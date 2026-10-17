@@ -1,0 +1,1089 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CLIMAE — Monitoramento Climático Zona Sul do RS</title>
+    <!-- Fonte Inter -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        :root {
+            --glass-bg: rgba(20, 30, 55, 0.48);
+            --glass-bg-inner: rgba(255, 255, 255, 0.04);
+            --glass-border: rgba(255, 255, 255, 0.12);
+            --glass-border-highlight: rgba(255, 255, 255, 0.22);
+            --glass-shadow: 0 12px 36px 0 rgba(0, 0, 0, 0.42);
+            --text-main: #f8fafc;
+            --text-muted: rgba(226, 232, 240, 0.65);
+            --accent-cyan: #38bdf8;
+            --accent-blue: #60a5fa;
+            --accent-purple: #c084fc;
+        }
+
+        * { box-sizing: border-box; }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            margin: 0;
+            padding: 1.5rem 2rem;
+            color: var(--text-main);
+            min-height: 100vh;
+            background-color: #060b19;
+            background-image:
+                radial-gradient(at 12% 15%, rgba(14, 165, 233, 0.22) 0px, transparent 45%),
+                radial-gradient(at 88% 20%, rgba(99, 102, 241, 0.18) 0px, transparent 50%),
+                radial-gradient(at 50% 85%, rgba(16, 185, 129, 0.12) 0px, transparent 55%),
+                linear-gradient(160deg, #050814 0%, #0b1736 50%, #071024 100%);
+            background-attachment: fixed;
+        }
+
+        @media (max-width: 768px) { body { padding: 1rem; } }
+
+        header {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: space-between;
+            align-items: center;
+            gap: 1rem;
+            padding: 1.15rem 1.5rem;
+            margin-bottom: 1.5rem;
+            background: var(--glass-bg);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border: 1px solid var(--glass-border);
+            border-radius: 20px;
+            box-shadow: var(--glass-shadow);
+        }
+
+        .brand-container {
+            display: flex;
+            align-items: center;
+            gap: 0.95rem;
+        }
+
+        .header-logo {
+            width: 46px;
+            height: 46px;
+            object-fit: contain;
+            filter: drop-shadow(0 0 14px rgba(56, 189, 248, 0.45));
+            transition: transform 0.25s ease, filter 0.25s ease;
+            flex-shrink: 0;
+        }
+
+        .header-logo:hover {
+            transform: scale(1.08) rotate(-3deg);
+            filter: drop-shadow(0 0 20px rgba(56, 189, 248, 0.75));
+        }
+
+        .title-group h1 {
+            margin: 0;
+            font-size: 1.35rem;
+            font-weight: 700;
+            letter-spacing: -0.02em;
+            background: linear-gradient(90deg, #ffffff, #7dd3fc);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .title-group p {
+            margin: 0.25rem 0 0;
+            color: var(--text-muted);
+            font-size: 0.82rem;
+            font-weight: 400;
+        }
+
+        .controls {
+            display: flex;
+            align-items: center;
+            gap: 0.85rem;
+            flex-wrap: wrap;
+        }
+
+        /* Selo Visual de Atualização a cada 15 min */
+        .sync-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.45rem;
+            background: rgba(16, 185, 129, 0.12);
+            border: 1px solid rgba(16, 185, 129, 0.35);
+            color: #6ee7b7;
+            padding: 0.4rem 0.8rem;
+            border-radius: 999px;
+            font-size: 0.76rem;
+            font-weight: 500;
+        }
+
+        .pulse-dot {
+            width: 8px;
+            height: 8px;
+            background-color: #10b981;
+            border-radius: 50%;
+            box-shadow: 0 0 8px #10b981;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.45; transform: scale(0.85); }
+            100% { opacity: 1; transform: scale(1); }
+        }
+
+        select, input, button {
+            font-family: inherit;
+            background: rgba(15, 23, 42, 0.65);
+            color: var(--text-main);
+            border: 1px solid var(--glass-border);
+            padding: 0.55rem 0.95rem;
+            border-radius: 12px;
+            font-size: 0.88rem;
+            backdrop-filter: blur(12px);
+            transition: all 0.2s ease;
+            outline: none;
+        }
+
+        select:hover, input:hover { border-color: var(--glass-border-highlight); }
+        select:focus, input:focus {
+            border-color: var(--accent-cyan);
+            box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.2);
+        }
+
+        button {
+            background: linear-gradient(135deg, rgba(14, 165, 233, 0.85), rgba(37, 99, 235, 0.85));
+            border: 1px solid rgba(125, 211, 252, 0.35);
+            cursor: pointer;
+            font-weight: 600;
+            box-shadow: 0 4px 15px rgba(14, 165, 233, 0.25);
+        }
+
+        button:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 6px 20px rgba(14, 165, 233, 0.4);
+        }
+
+        .btn-secondary {
+            background: rgba(255, 255, 255, 0.07);
+            border-color: var(--glass-border);
+            box-shadow: none;
+        }
+        .btn-secondary:hover { background: rgba(255, 255, 255, 0.14); box-shadow: none; }
+
+        .btn-locate {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.4rem;
+            background: rgba(56, 189, 248, 0.14);
+            border: 1px solid rgba(56, 189, 248, 0.4);
+            color: #bae6fd;
+            padding: 0.5rem 0.85rem;
+            border-radius: 12px;
+            font-size: 0.82rem;
+            font-weight: 500;
+            box-shadow: none;
+        }
+        .btn-locate:hover {
+            background: rgba(56, 189, 248, 0.25);
+            box-shadow: 0 0 15px rgba(56, 189, 248, 0.25);
+        }
+        .loc-status {
+            font-size: 0.75rem;
+            color: #7dd3fc;
+            opacity: 0.9;
+        }
+
+        .grid-top {
+            display: grid;
+            grid-template-columns: 1.15fr 1fr;
+            gap: 1.5rem;
+            margin-bottom: 1.5rem;
+        }
+        @media (max-width: 1080px) { .grid-top { grid-template-columns: 1fr; } }
+
+        .card {
+            background: var(--glass-bg);
+            backdrop-filter: blur(18px);
+            -webkit-backdrop-filter: blur(18px);
+            border: 1px solid var(--glass-border);
+            border-top: 1px solid var(--glass-border-highlight);
+            border-radius: 22px;
+            padding: 1.4rem;
+            box-shadow: var(--glass-shadow);
+            margin-bottom: 1.5rem;
+        }
+        .grid-top .card { margin-bottom: 0; }
+
+        .card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1.15rem;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+        }
+
+        .card-header h2 {
+            margin: 0;
+            font-size: 0.92rem;
+            font-weight: 600;
+            color: #bae6fd;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .meta-info { font-size: 0.78rem; color: var(--text-muted); }
+
+        .metrics-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(125px, 1fr));
+            gap: 0.85rem;
+            margin-bottom: 1.35rem;
+        }
+
+        .metric-box {
+            background: var(--glass-bg-inner);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            padding: 0.95rem 1rem;
+            border-radius: 16px;
+            transition: transform 0.2s ease, background 0.2s ease;
+        }
+        .metric-box:hover { background: rgba(255, 255, 255, 0.07); transform: translateY(-2px); }
+        .metric-label { font-size: 0.72rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; font-weight: 500; }
+        .metric-value { font-size: 1.75rem; font-weight: 300; margin-top: 0.35rem; letter-spacing: -0.03em; color: #ffffff; }
+        .metric-unit { font-size: 0.85rem; color: var(--text-muted); font-weight: 400; margin-left: 2px; }
+
+        .chart-container {
+            position: relative;
+            height: 235px;
+            width: 100%;
+            background: rgba(0, 0, 0, 0.16);
+            border-radius: 16px;
+            padding: 0.75rem;
+            border: 1px solid rgba(255, 255, 255, 0.05);
+        }
+
+        /* Mapa Estilizado com Filtro Dark sobre OpenStreetMap */
+        #map {
+            height: 395px;
+            width: 100%;
+            border-radius: 16px;
+            border: 1px solid var(--glass-border);
+            box-shadow: inset 0 2px 10px rgba(0,0,0,0.4);
+            background: #0b1528;
+        }
+
+        #map .leaflet-tile-pane {
+            filter: invert(100%) hue-rotate(180deg) brightness(92%) contrast(88%);
+        }
+
+        .map-legend {
+            display: flex;
+            gap: 1.1rem;
+            font-size: 0.78rem;
+            color: var(--text-muted);
+            margin-top: 0.8rem;
+            flex-wrap: wrap;
+        }
+
+        .dot {
+            display: inline-block;
+            width: 9px;
+            height: 9px;
+            border-radius: 50%;
+            margin-right: 5px;
+            box-shadow: 0 0 8px currentColor;
+        }
+
+        .factor-item { margin-bottom: 0.7rem; }
+        .factor-header { display: flex; justify-content: space-between; font-size: 0.8rem; margin-bottom: 0.25rem; }
+        .factor-bar-bg { height: 6px; background: rgba(255, 255, 255, 0.08); border-radius: 999px; overflow: hidden; }
+        .factor-bar-fill { height: 100%; border-radius: 999px; background: linear-gradient(90deg, #38bdf8, #818cf8); transition: width 0.5s ease; }
+
+        .filter-bar {
+            display: flex;
+            gap: 0.85rem;
+            flex-wrap: wrap;
+            margin-bottom: 1.15rem;
+            align-items: end;
+            background: rgba(0, 0, 0, 0.15);
+            padding: 0.9rem 1rem;
+            border-radius: 14px;
+            border: 1px solid rgba(255, 255, 255, 0.06);
+        }
+
+        .filter-group { display: flex; flex-direction: column; gap: 0.3rem; font-size: 0.76rem; color: var(--text-muted); }
+
+        table { width: 100%; border-collapse: collapse; font-size: 0.87rem; }
+        th, td { text-align: left; padding: 0.75rem 0.65rem; border-bottom: 1px solid rgba(255, 255, 255, 0.07); }
+        tbody tr:hover { background: rgba(255, 255, 255, 0.04); }
+        th { color: var(--text-muted); font-weight: 600; font-size: 0.74rem; text-transform: uppercase; letter-spacing: 0.06em; }
+
+        .badge {
+            display: inline-block;
+            white-space: nowrap;
+            text-align: center;
+            padding: 0.28rem 0.7rem;
+            border-radius: 999px;
+            font-size: 0.73rem;
+            font-weight: 600;
+            backdrop-filter: blur(8px);
+        }
+
+        .sev-alta { background: rgba(239, 68, 68, 0.18); color: #fca5a5; border: 1px solid rgba(239, 68, 68, 0.45); }
+        .sev-media { background: rgba(245, 158, 11, 0.18); color: #fcd34d; border: 1px solid rgba(245, 158, 11, 0.45); }
+        .sev-baixa { background: rgba(16, 185, 129, 0.18); color: #6ee7b7; border: 1px solid rgba(16, 185, 129, 0.45); }
+        .badge-exp { background: rgba(192, 132, 252, 0.15); color: #e9d5ff; border: 1px solid rgba(192, 132, 252, 0.35); text-transform: none; }
+
+        .leaflet-popup-content-wrapper, .leaflet-popup-tip {
+            background: rgba(15, 23, 42, 0.88) !important;
+            backdrop-filter: blur(14px);
+            color: #f8fafc !important;
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            border-radius: 14px !important;
+        }
+
+        /* Banner clicável de Nova Atualização no Painel 05 */
+        .update-banner {
+            display: none;
+            align-items: center;
+            justify-content: space-between;
+            background: linear-gradient(90deg, rgba(14, 165, 233, 0.22), rgba(56, 189, 248, 0.12));
+            border: 1px solid rgba(56, 189, 248, 0.45);
+            color: #e0f2fe;
+            padding: 0.6rem 0.95rem;
+            border-radius: 12px;
+            font-size: 0.82rem;
+            font-weight: 500;
+            margin-bottom: 0.85rem;
+            cursor: pointer;
+            box-shadow: 0 4px 15px rgba(14, 165, 233, 0.2);
+            transition: all 0.2s ease;
+        }
+        .update-banner:hover {
+            background: linear-gradient(90deg, rgba(14, 165, 233, 0.35), rgba(56, 189, 248, 0.22));
+            transform: translateY(-1px);
+        }
+    </style>
+</head>
+<body>
+
+    <header>
+        <div class="title-group">
+            <div class="brand-container">
+                <img src="{{ url_for('static', filename='img/climae_logo.png') }}" alt="CLIMAE Logo" class="header-logo" />
+                <div>
+                    <h1>CLIMAE • Zona Sul do RS</h1>
+                    <p>Monitoramento Meteorológico em Tempo Real & Análise de Risco Regional (MVP Completo)</p>
+                </div>
+            </div>
+        </div>
+        <div class="controls">
+            <div class="sync-pill" title="O coletor em segundo plano busca novos dados da Open-Meteo a cada 15 minutos automaticamente">
+                <span class="pulse-dot"></span>
+                Atualização automática a cada 15 min
+            </div>
+
+            <label for="regionSelect" style="font-size: 0.85rem; color: var(--text-muted);">Localidade:</label>
+            <select id="regionSelect">
+                {% for r in regions %}
+                <option value="{{ r.id }}" data-lat="{{ r.latitude }}" data-lon="{{ r.longitude }}">
+                    {{ r.municipality }} — {{ r.name }}
+                </option>
+                {% endfor %}
+            </select>
+
+            <button type="button" class="btn-locate" id="btnLocateMe" onclick="locateByBrowserGPS()" title="Detectar sub-região exata via Wi-Fi / GPS do navegador">
+                📍 Perto de mim
+            </button>
+            <span id="locFeedback" class="loc-status"></span>
+        </div>
+    </header>
+
+    <!-- PRIMEIRA LINHA: 01. DASHBOARD E 02. MAPA -->
+    <div class="grid-top">
+        <!-- 01. DASHBOARD METEOROLÓGICO -->
+        <div class="card">
+            <div class="card-header">
+                <h2>01. Condições Atuais & Previsão</h2>
+                <span class="meta-info" id="weatherMeta">Sincronizando...</span>
+            </div>
+
+            <div class="metrics-grid">
+                <div class="metric-box">
+                    <div class="metric-label">Temperatura</div>
+                    <div class="metric-value" id="valTemp">--<span class="metric-unit">°C</span></div>
+                </div>
+                <div class="metric-box">
+                    <div class="metric-label">Umidade</div>
+                    <div class="metric-value" id="valHum">--<span class="metric-unit">%</span></div>
+                </div>
+                <div class="metric-box">
+                    <div class="metric-label">Vento (10m)</div>
+                    <div class="metric-value" id="valWind">--<span class="metric-unit">km/h</span></div>
+                </div>
+                <div class="metric-box">
+                    <div class="metric-label">Chuva Agora</div>
+                    <div class="metric-value" id="valPrecip">--<span class="metric-unit">mm</span></div>
+                </div>
+                <div class="metric-box">
+                    <div class="metric-label">Prob. Chuva</div>
+                    <div class="metric-value" id="valProb">--<span class="metric-unit">%</span></div>
+                </div>
+            </div>
+
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 0.55rem; flex-wrap:wrap;">
+                <span class="meta-info">Tendência Horária — Próximas 24h (Horário de Brasília)</span>
+                <span class="meta-info" style="color:#6ee7b7;">Ciclo de coleta Open-Meteo: 15 em 15 minutos</span>
+            </div>
+            <div class="chart-container">
+                <canvas id="forecastChart"></canvas>
+            </div>
+        </div>
+
+        <!-- 02. MAPA INTERATIVO -->
+        <div class="card">
+            <div class="card-header">
+                <h2>02. Mapa Geoespacial Interativo</h2>
+                <span class="meta-info">Toque em um ponto para focar</span>
+            </div>
+            <div id="map"></div>
+            <div class="map-legend">
+                <span><i class="dot" style="background:#10b981; color:#10b981;"></i>Normal</span>
+                <span><i class="dot" style="background:#f59e0b; color:#f59e0b;"></i>Atenção</span>
+                <span><i class="dot" style="background:#ef4444; color:#ef4444;"></i>Alerta Severo</span>
+                <span><i class="dot" style="background:#a855f7; color:#a855f7;"></i>Ocorrência Histórica</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- SEGUNDA LINHA: 04. ÍNDICE DE RISCO E 05. TRÂNSITO INSTITUCIONAL -->
+    <div class="grid-top">
+        <!-- 04. ÍNDICE INICIAL DE RISCO -->
+        <div class="card">
+            <div class="card-header">
+                <h2>
+                    04. Índice de Risco Climático
+                    <span class="badge badge-exp">Experimental</span>
+                </h2>
+                <span class="meta-info" id="riskMeta">Versão: --</span>
+            </div>
+
+            <div style="display:flex; align-items:center; gap:1.5rem; margin-bottom:1.1rem; flex-wrap:wrap;">
+                <div class="metric-box" style="min-width:165px; text-align:center; padding: 1.2rem 1rem;">
+                    <div class="metric-label">Score Calculado</div>
+                    <div class="metric-value" id="riskScore" style="font-size:2.6rem; font-weight:600; margin: 0.25rem 0;">--</div>
+                    <div id="riskBadge" style="font-weight:600; font-size:0.88rem;">--</div>
+                </div>
+                <div style="flex:1; min-width: 240px;" id="riskFactorsList">
+                    Carregando composição de risco...
+                </div>
+            </div>
+
+            <div class="meta-info" style="border-top:1px solid var(--glass-border); padding-top:0.65rem;">
+                ⚠️ Indicador experimental de apoio à decisão. Não substitui alertas oficiais da Defesa Civil ou INMET.
+            </div>
+        </div>
+
+        <!-- 05. PAINEL DE TRÂNSITO (PRF & ECOSUL) -->
+        <div class="card">
+            <div class="card-header">
+                <h2>05. Situação das Rodovias</h2>
+                <span class="badge sev-baixa" id="trafficSourceStatus">PRF & Ecosul</span>
+            </div>
+
+            <!-- AVISO INTERATIVO DE NOVA ATUALIZAÇÃO (Oculto por padrão) -->
+            <div id="trafficUpdateBanner" class="update-banner" onclick="loadTrafficPanel()">
+                <span>🔔 <strong>Nova atualização disponível</strong> nas condições das rodovias</span>
+                <span style="text-decoration: underline; font-weight: 600; color: #38bdf8;">Clique para atualizar</span>
+            </div>
+
+            <div id="trafficCorridors" style="font-size:0.8rem; color:var(--text-muted); margin-bottom:0.85rem;"></div>
+            <div style="overflow-x:auto;">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Rodovia / Boletim</th>
+                            <th>Município</th>
+                            <th>Condição</th>
+                            <th>Órgão</th>
+                        </tr>
+                    </thead>
+                    <tbody id="trafficTableBody">
+                        <tr><td colspan="4">Consultando boletins rodoviários...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- TERCEIRA LINHA: 06. CENTRAL DE ALERTAS -->
+    <div class="card">
+        <div class="card-header">
+            <h2>06. Alertas Automáticos & Controle de Duplicidade</h2>
+            <span class="meta-info" id="alertsMeta">Regras: Chuva 24h ≥ 25mm | Vento ≥ 55km/h | Risco ≥ 50 pts</span>
+        </div>
+        <div style="overflow-x: auto;">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Horário (BRT)</th>
+                        <th>Município / Região</th>
+                        <th>Regra Acionada</th>
+                        <th>Canal</th>
+                        <th>Status / Deduplicação</th>
+                    </tr>
+                </thead>
+                <tbody id="alertsTableBody">
+                    <tr><td colspan="5">Verificando regras de alerta...</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- QUARTA LINHA: 03. HISTÓRICO DE OCORRÊNCIAS -->
+    <div class="card" style="margin-bottom:0;">
+        <div class="card-header">
+            <h2>03. Histórico de Eventos & Anomalias</h2>
+            <span class="meta-info" id="occCount">Aguardando filtros</span>
+        </div>
+
+        <div class="filter-bar">
+            <div class="filter-group">
+                <label>Filtrar por Localidade</label>
+                <select id="occRegionFilter">
+                    <option value="">Todas as regiões da Zona Sul</option>
+                    {% for r in regions %}
+                    <option value="{{ r.id }}">{{ r.municipality }} — {{ r.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="filter-group">
+                <label>Data Inicial</label>
+                <input type="date" id="occStartDate">
+            </div>
+            <div class="filter-group">
+                <label>Data Final</label>
+                <input type="date" id="occEndDate">
+            </div>
+            <button onclick="loadOccurrences()">Filtrar Registros</button>
+            <button class="btn-secondary" onclick="resetOccurrenceFilters()">Limpar</button>
+        </div>
+
+        <div style="overflow-x: auto;">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Data / Hora (BRT)</th>
+                        <th>Município / Região</th>
+                        <th>Evento</th>
+                        <th>Severidade</th>
+                        <th>Detalhamento</th>
+                        <th>Fonte & Confiabilidade</th>
+                    </tr>
+                </thead>
+                <tbody id="occTableBody">
+                    <tr>
+                        <td colspan="6" style="color:var(--text-muted); text-align:center; padding:1.8rem 1rem;">
+                            🔍 Selecione uma localidade ou intervalo de datas acima e clique em <strong>Filtrar Registros</strong> para exibir os registros documentados.
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Leaflet JS -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script>
+        let chartInstance = null;
+        let map = null;
+        let regionLayerGroup = null;
+        let occurrenceLayerGroup = null;
+
+        function formatBRT(isoString, onlyHour = false) {
+            if (!isoString) return "--";
+            let s = String(isoString);
+            if (!s.endsWith('Z') && !s.includes('+') && !s.slice(10).includes('-')) {
+                s += 'Z';
+            }
+            const dt = new Date(s);
+            if (onlyHour) {
+                return dt.toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit' });
+            }
+            return dt.toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo', dateStyle: 'short', timeStyle: 'short' });
+        }
+
+        function initMap() {
+            map = L.map('map').setView([-32.0350, -52.3376], 8);
+            // OpenStreetMap oficial e 100% gratuito (estilizado dark via filtro CSS na .leaflet-tile-pane)
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                maxZoom: 18,
+                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank">OpenStreetMap</a> contributors'
+            }).addTo(map);
+
+            regionLayerGroup = L.layerGroup().addTo(map);
+            occurrenceLayerGroup = L.layerGroup().addTo(map);
+        }
+
+        function getRegionColor(item) {
+            if (item.precipitation_mm >= 5 || item.wind_speed_kmh >= 55 || item.rain_probability >= 80) return "#ef4444";
+            if (item.precipitation_mm > 0.5 || item.wind_speed_kmh >= 35 || item.rain_probability >= 50) return "#f59e0b";
+            return "#10b981";
+        }
+
+        async function loadMapSummary() {
+            const res = await fetch('/api/weather-summary');
+            const data = await res.json();
+            regionLayerGroup.clearLayers();
+
+            data.forEach(item => {
+                const r = item.region;
+                const color = getRegionColor(item);
+
+                const circle = L.circleMarker([r.latitude, r.longitude], {
+                    radius: 11,
+                    fillColor: color,
+                    color: "#ffffff",
+                    weight: 1.5,
+                    opacity: 0.9,
+                    fillOpacity: 0.8
+                });
+
+                circle.bindPopup(`
+                    <div style="font-family:'Inter',sans-serif; font-size:0.85rem;">
+                        <strong>${r.municipality} — ${r.name}</strong><br>
+                        Temp: ${item.temperature_c ?? '--'} °C | Vento: ${item.wind_speed_kmh ?? '--'} km/h<br>
+                        Risco: <strong>${item.risk_level}</strong> (${item.risk_score ?? '--'}/100)
+                    </div>
+                `);
+
+                circle.on('click', () => {
+                    document.getElementById('regionSelect').value = r.id;
+                    onRegionChanged(r.id);
+                });
+
+                regionLayerGroup.addLayer(circle);
+            });
+        }
+
+        async function loadRegionWeather(regionId) {
+            const res = await fetch(`/api/weather/${regionId}`);
+            const data = await res.json();
+
+            const cur = data.current;
+            if (cur) {
+                document.getElementById('valTemp').innerHTML = `${cur.temperature_c ?? '--'}<span class="metric-unit">°C</span>`;
+                document.getElementById('valHum').innerHTML = `${cur.humidity_percent ?? '--'}<span class="metric-unit">%</span>`;
+                document.getElementById('valWind').innerHTML = `${cur.wind_speed_kmh ?? '--'}<span class="metric-unit">km/h</span>`;
+                document.getElementById('valPrecip').innerHTML = `${cur.precipitation_mm ?? '--'}<span class="metric-unit">mm</span>`;
+                document.getElementById('valProb').innerHTML = `${cur.rain_probability ?? '--'}<span class="metric-unit">%</span>`;
+                document.getElementById('weatherMeta').innerText =
+                    `Fonte: ${cur.source} • Última leitura: ${formatBRT(cur.observed_at)} (Horário de Brasília • Ciclo: 15 min)`;
+            }
+
+            if (data.region && map) {
+                map.panTo([data.region.latitude, data.region.longitude]);
+            }
+
+            const labels = data.forecast_24h.map(f => formatBRT(f.time, true));
+            const temps = data.forecast_24h.map(f => f.temperature_c);
+            const probs = data.forecast_24h.map(f => f.rain_probability);
+
+            const ctx = document.getElementById('forecastChart').getContext('2d');
+            if (chartInstance) chartInstance.destroy();
+
+            const tempGrad = ctx.createLinearGradient(0, 0, 0, 220);
+            tempGrad.addColorStop(0, 'rgba(56, 189, 248, 0.35)');
+            tempGrad.addColorStop(1, 'rgba(56, 189, 248, 0.0)');
+
+            chartInstance = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: labels,
+                    datasets: [
+                        {
+                            type: 'line',
+                            label: 'Temperatura (°C)',
+                            data: temps,
+                            borderColor: '#38bdf8',
+                            backgroundColor: tempGrad,
+                            borderWidth: 2.5,
+                            pointRadius: 2,
+                            fill: true,
+                            yAxisID: 'yTemp',
+                            tension: 0.4
+                        },
+                        {
+                            type: 'bar',
+                            label: 'Prob. Chuva (%)',
+                            data: probs,
+                            backgroundColor: 'rgba(129, 140, 248, 0.28)',
+                            borderColor: 'rgba(129, 140, 248, 0.65)',
+                            borderWidth: 1,
+                            borderRadius: 4,
+                            yAxisID: 'yProb'
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { labels: { color: '#e2e8f0', font: { family: 'Inter', size: 11 } } } },
+                    scales: {
+                        x: { ticks: { color: 'rgba(226,232,240,0.6)', font: { size: 10 } }, grid: { color: 'rgba(255,255,255,0.04)' } },
+                        yTemp: { type: 'linear', position: 'left', ticks: { color: '#7dd3fc' }, grid: { color: 'rgba(255,255,255,0.06)' } },
+                        yProb: { type: 'linear', position: 'right', min: 0, max: 100, ticks: { color: '#a5b4fc' }, grid: { drawOnChartArea: false } }
+                    }
+                }
+            });
+        }
+
+        async function loadRegionRisk(regionId) {
+            const res = await fetch(`/api/risk/${regionId}`);
+            const data = await res.json();
+
+            document.getElementById('riskMeta').innerText = `Método ${data.method_version} • ${formatBRT(data.assessed_at)}`;
+            document.getElementById('riskScore').innerText = data.score !== null ? data.score : 'N/A';
+
+            const badge = document.getElementById('riskBadge');
+            badge.innerText = data.risk_level;
+            if (data.score >= 75) badge.style.color = '#fca5a5';
+            else if (data.score >= 50) badge.style.color = '#fcd34d';
+            else if (data.score >= 25) badge.style.color = '#7dd3fc';
+            else badge.style.color = '#6ee7b7';
+
+            const f = data.factors || {};
+            if (f.precipitacao_40pct) {
+                const p1 = (f.precipitacao_40pct.pontos / 40) * 100;
+                const p2 = (f.vulnerabilidade_historico_35pct.pontos / 35) * 100;
+                const p3 = (f.condicoes_complementares_25pct.pontos / 25) * 100;
+
+                document.getElementById('riskFactorsList').innerHTML = `
+                    <div class="factor-item">
+                        <div class="factor-header">
+                            <span><strong>Precipitação (Peso 40%)</strong> — Acum. 24h: ${f.precipitacao_40pct.acumulado_previsto_24h_mm}mm</span>
+                            <span>${f.precipitacao_40pct.pontos} / 40 pts</span>
+                        </div>
+                        <div class="factor-bar-bg"><div class="factor-bar-fill" style="width:${p1}%"></div></div>
+                    </div>
+                    <div class="factor-item">
+                        <div class="factor-header">
+                            <span><strong>Vulnerabilidade & Histórico (Peso 35%)</strong></span>
+                            <span>${f.vulnerabilidade_historico_35pct.pontos} / 35 pts</span>
+                        </div>
+                        <div class="factor-bar-bg"><div class="factor-bar-fill" style="width:${p2}%"></div></div>
+                    </div>
+                    <div class="factor-item" style="margin-bottom:0;">
+                        <div class="factor-header">
+                            <span><strong>Complementares (Peso 25%)</strong> — Vento máx: ${f.condicoes_complementares_25pct.vento_pico_kmh} km/h</span>
+                            <span>${f.condicoes_complementares_25pct.pontos} / 25 pts</span>
+                        </div>
+                        <div class="factor-bar-bg"><div class="factor-bar-fill" style="width:${p3}%"></div></div>
+                    </div>
+                `;
+            }
+        }
+
+        let currentTrafficTimestamp = null;
+
+        async function loadTrafficPanel() {
+            const res = await fetch('/api/traffic');
+            const data = await res.json();
+
+            // Guarda o horário da versão carregada na tela e esconde o banner de aviso
+            currentTrafficTimestamp = data.last_updated_at;
+            document.getElementById('trafficUpdateBanner').style.display = 'none';
+
+            document.getElementById('trafficSourceStatus').innerText =
+                data.last_updated_at ? `Atualizado às ${formatBRT(data.last_updated_at, true)}` : data.source_status;
+            document.getElementById('trafficCorridors').innerHTML =
+                `Corredores monitorados: <strong>${data.corridors_monitored.join(' • ')}</strong>`;
+
+            const tbody = document.getElementById('trafficTableBody');
+            if (!data.events || data.events.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="4" style="color:var(--text-muted);">Nenhum boletim ativo no momento.</td></tr>`;
+                return;
+            }
+
+            tbody.innerHTML = data.events.map(ev => {
+                let badgeClass = 'sev-baixa';
+                if (ev.status === 'Ativo' || ev.is_stale) badgeClass = 'sev-alta';
+                else if (ev.status === 'Atenção') badgeClass = 'sev-media';
+
+                return `
+                    <tr>
+                        <td>${ev.event_type}</td>
+                        <td>${ev.municipality}</td>
+                        <td><span class="badge ${badgeClass}">${ev.status}</span></td>
+                        <td>${ev.source}</td>
+                    </tr>
+                `;
+            }).join('');
+        }
+
+        // Apenas verifica se há versão nova no banco, SEM recarregar a tabela sozinho
+        async function checkForTrafficUpdates() {
+            try {
+                const res = await fetch('/api/traffic/check-update');
+                const data = await res.json();
+                if (data.last_updated_at && currentTrafficTimestamp && data.last_updated_at !== currentTrafficTimestamp) {
+                    document.getElementById('trafficUpdateBanner').style.display = 'flex';
+                }
+            } catch (e) {
+                console.error("Erro ao checar atualização de rodovias:", e);
+            }
+        }
+
+        async function loadAlerts() {
+            const res = await fetch('/api/alerts');
+            const alerts = await res.json();
+            const tbody = document.getElementById('alertsTableBody');
+
+            if (!alerts || alerts.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="5" style="color:var(--text-muted); text-align:center; padding:1.2rem;">Nenhum limiar crítico ultrapassado nas regiões monitoradas hoje.</td></tr>`;
+                return;
+            }
+
+            tbody.innerHTML = alerts.map(a => `
+                <tr>
+                    <td>${formatBRT(a.created_at)}</td>
+                    <td><strong>${a.municipality}</strong> — ${a.region_name}</td>
+                    <td>${a.triggered_rule}</td>
+                    <td>${a.channel}</td>
+                    <td><span class="badge sev-media">${a.status}</span> <span style="font-size:0.75rem; color:var(--text-muted);">(${a.dedup_key})</span></td>
+                </tr>
+            `).join('');
+        }
+
+        async function loadOccurrences() {
+            const regionId = document.getElementById('occRegionFilter').value;
+            const startDate = document.getElementById('occStartDate').value;
+            const endDate = document.getElementById('occEndDate').value;
+            const tbody = document.getElementById('occTableBody');
+
+            // Exige que o usuário selecione ao menos um filtro para consultar
+            if (!regionId && !startDate && !endDate) {
+                if (tbody.innerHTML.includes('🔍')) {
+                    return;
+                }
+                tbody.innerHTML = `<tr><td colspan="6" style="color:#fcd34d; text-align:center; padding:1.5rem 1rem;">⚠️ Por favor, preencha ao menos um filtro (Localidade ou Período) antes de clicar em Filtrar Registros.</td></tr>`;
+                document.getElementById('occCount').innerText = 'Filtro obrigatório';
+                occurrenceLayerGroup.clearLayers();
+                return;
+            }
+
+            tbody.innerHTML = `<tr><td colspan="6" style="color:var(--text-muted); text-align:center; padding:1.2rem;">Consultando histórico...</td></tr>`;
+
+            const params = new URLSearchParams();
+            if (regionId) params.append('region_id', regionId);
+            if (startDate) params.append('start_date', startDate);
+            if (endDate) params.append('end_date', endDate);
+
+            const res = await fetch(`/api/occurrences?${params.toString()}`);
+            const list = await res.json();
+
+            document.getElementById('occCount').innerText = `${list.length} registro(s) encontrado(s)`;
+            tbody.innerHTML = '';
+            occurrenceLayerGroup.clearLayers();
+
+            if (list.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="6" style="color:var(--text-muted); text-align:center; padding:1.5rem;">Nenhuma ocorrência encontrada para os filtros selecionados.</td></tr>`;
+                return;
+            }
+
+            list.forEach(item => {
+                let sevClass = 'sev-baixa';
+                if (item.severity && item.severity.toLowerCase().includes('alta')) sevClass = 'sev-alta';
+                else if (item.severity && item.severity.toLowerCase().includes('média')) sevClass = 'sev-media';
+
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td>${formatBRT(item.occurred_at)}</td>
+                    <td><strong>${item.municipality}</strong> — ${item.region_name}</td>
+                    <td>${item.event_type}</td>
+                    <td><span class="badge ${sevClass}">${item.severity || 'N/A'}</span></td>
+                    <td>${item.description || ''}</td>
+                    <td>${item.source} <span style="color:var(--text-muted); font-size:0.78rem;">(${item.reliability})</span></td>
+                `;
+                tbody.appendChild(tr);
+
+                if (item.latitude && item.longitude) {
+                    const marker = L.circleMarker([item.latitude + 0.012, item.longitude + 0.012], {
+                        radius: 5.5,
+                        fillColor: "#c084fc",
+                        color: "#ffffff",
+                        weight: 1.2,
+                        fillOpacity: 0.9
+                    });
+                    marker.bindPopup(`<strong>${item.event_type}</strong><br>${item.municipality} (${item.region_name})<br>${formatBRT(item.occurred_at)}`);
+                    occurrenceLayerGroup.addLayer(marker);
+                }
+            });
+        }
+
+        function resetOccurrenceFilters() {
+            document.getElementById('occRegionFilter').value = '';
+            document.getElementById('occStartDate').value = '';
+            document.getElementById('occEndDate').value = '';
+            occurrenceLayerGroup.clearLayers();
+            document.getElementById('occCount').innerText = 'Aguardando filtros';
+            document.getElementById('occTableBody').innerHTML = `
+                <tr>
+                    <td colspan="6" style="color:var(--text-muted); text-align:center; padding:1.8rem 1rem;">
+                        🔍 Selecione uma localidade ou intervalo de datas acima e clique em <strong>Filtrar Registros</strong> para exibir os registros documentados.
+                    </td>
+                </tr>
+            `;
+        }
+
+        // Fórmula de Haversine: calcula a distância em km entre duas coordenadas (Lat/Lon)
+        function getDistanceKm(lat1, lon1, lat2, lon2) {
+            const R = 6371; // Raio da Terra em km
+            const dLat = (lat2 - lat1) * Math.PI / 180;
+            const dLon = (lon2 - lon1) * Math.PI / 180;
+            const a =
+                Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+                Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+                Math.sin(dLon / 2) * Math.sin(dLon / 2);
+            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+            return R * c;
+        }
+
+        // Encontra a região cadastrada mais próxima das coordenadas (lat, lon) do usuário
+        function selectClosestRegion(userLat, userLon, sourceLabel) {
+            const select = document.getElementById('regionSelect');
+            const options = Array.from(select.options);
+            let closestId = null;
+            let minDistance = Infinity;
+
+            options.forEach(opt => {
+                const rLat = parseFloat(opt.getAttribute('data-lat'));
+                const rLon = parseFloat(opt.getAttribute('data-lon'));
+                if (!isNaN(rLat) && !isNaN(rLon)) {
+                    const dist = getDistanceKm(userLat, userLon, rLat, rLon);
+                    if (dist < minDistance) {
+                        minDistance = dist;
+                        closestId = opt.value;
+                    }
+                }
+            });
+
+            if (closestId) {
+                select.value = closestId;
+                localStorage.setItem('climae_preferred_region_id', closestId);
+                onRegionChanged(closestId);
+
+                const feedback = document.getElementById('locFeedback');
+                if (feedback) {
+                    feedback.innerText = '';
+                }
+            }
+        }
+
+        // 1. Auto-detecção silenciosa por IP (1ª visita, sem pop-up de permissão)
+        async function autoDetectRegionOnLoad() {
+            const select = document.getElementById('regionSelect');
+            const savedRegionId = localStorage.getItem('climae_preferred_region_id');
+
+            // Se já existe preferência salva no navegador, usa imediatamente (0 gasto de API)
+            if (savedRegionId && select.querySelector(`option[value="${savedRegionId}"]`)) {
+                select.value = savedRegionId;
+                onRegionChanged(savedRegionId);
+                return;
+            }
+
+            // Caso contrário, tenta localizar silenciosamente pelo IP (API pública gratuita)
+            try {
+                const res = await fetch('https://ipapi.co/json/');
+                if (res.ok) {
+                    const ipData = await res.json();
+                    if (ipData.latitude && ipData.longitude) {
+                        selectClosestRegion(ipData.latitude, ipData.longitude, 'Via IP');
+                        return;
+                    }
+                }
+            } catch (err) {
+                console.warn("Auto-detecção por IP indisponível ou bloqueada, usando padrão.", err);
+            }
+
+            // Fallback: carrega a primeira opção da lista
+            if (select.value) {
+                onRegionChanged(select.value);
+            }
+        }
+
+        // 2. Detecção de alta precisão sob demanda (Wi-Fi / GPS Nativo do navegador)
+        function locateByBrowserGPS() {
+            const feedback = document.getElementById('locFeedback');
+            if (!navigator.geolocation) {
+                if (feedback) {
+                    feedback.innerText = "(Geolocalização não suportada)";
+                    setTimeout(() => { if (feedback) feedback.innerText = ''; }, 3500);
+                }
+                return;
+            }
+
+            if (feedback) feedback.innerText = "Localizando...";
+            navigator.geolocation.getCurrentPosition(
+                (pos) => {
+                    selectClosestRegion(pos.coords.latitude, pos.coords.longitude, 'GPS/Wi-Fi');
+                },
+                (err) => {
+                    console.warn("Permissão negada ou falha no GPS:", err);
+                    if (feedback) {
+                        feedback.innerText = "(Permissão negada)";
+                        setTimeout(() => { if (feedback) feedback.innerText = ''; }, 3500);
+                    }
+                },
+                { enableHighAccuracy: true, timeout: 8000 }
+            );
+        }
+
+        function onRegionChanged(regionId) {
+            loadRegionWeather(regionId);
+            loadRegionRisk(regionId);
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            initMap();
+            loadMapSummary();
+            loadOccurrences();
+            loadTrafficPanel();
+            loadAlerts();
+
+            // Inicia com a detecção inteligente (Memória -> IP -> Fallback)
+            autoDetectRegionOnLoad();
+
+            const select = document.getElementById('regionSelect');
+            select.addEventListener('change', (e) => {
+                // Salva a escolha manual do usuário para os próximos acessos
+                localStorage.setItem('climae_preferred_region_id', e.target.value);
+                document.getElementById('locFeedback').innerText = '';
+                onRegionChanged(e.target.value);
+            });
+
+            // 1. Checagem silenciosa de rodovias a cada 1 minuto (apenas 1 consulta de timestamp)
+            setInterval(() => {
+                checkForTrafficUpdates();
+            }, 60000);
+
+            // 2. Atualização geral dos painéis a cada 5 minutos (300.000 ms)
+            setInterval(() => {
+                const currentRegionId = document.getElementById('regionSelect').value;
+                if (currentRegionId) {
+                    onRegionChanged(currentRegionId);
+                    loadMapSummary();
+                    loadAlerts();
+                }
+            }, 300000);
+        });
+    </script>
+</body>
+</html>

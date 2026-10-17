@@ -1,0 +1,26 @@
+monitoramento-clima-rs/
+├── app/
+│   ├── __init__.py          # Inicialização do Flask (Application Factory) e extensões
+│   ├── config.py            # Configurações por ambiente (Dev, Test, Prod)
+│   ├── models.py            # Tabelas do banco (SQLAlchemy)
+│   ├── routes/              # Endpoints e views (Dashboard, Mapa, Histórico, API)
+│   │   ├── __init__.py
+│   │   └── main.py
+│   ├── collectors/          # Coletores Python (Open-Meteo, INMET, Trânsito)
+│   │   ├── __init__.py
+│   │   └── open_meteo.py
+│   ├── services/            # Regras de negócio (Cálculo do índice de risco, Alertas)
+│   │   ├── __init__.py
+│   │   └── risk_engine.py
+│   ├── scheduler.py         # Configuração do APScheduler
+│   ├── static/              # CSS, JS (Leaflet, Chart.js/Plotly)
+│   └── templates/           # HTML (Jinja2)
+├── migrations/              # Gerenciado pelo Flask-Migrate / Alembic
+├── scripts/
+│   └── seed_regions.py      # Script para cadastrar os municípios da Zona Sul
+├── tests/                   # Testes automatizados com pytest
+├── .env.example             # Exemplo de variáveis de ambiente
+├── .gitignore
+├── requirements.txt
+├── README.md
+└── run.py                   # Ponto de entrada da aplicação
