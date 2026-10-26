@@ -14,36 +14,123 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
         :root {
+            /* Cores de Fundo e Superfície (Dark Command Center) */
+            --bg-main: #0b0f19;
+            --bg-surface: #111827;
+            --bg-card: #1f2937;
+            --bg-card-hover: #374151;
+            
+            /* Bordas e Divisores */
+            --border-color: #374151;
+            --border-subtle: rgba(255, 255, 255, 0.06);
+
+            /* Tipografia */
+            --text-primary: #f9fafb;
+            --text-secondary: #9ca3af;
+            --text-muted: #6b7280;
+
+            /* Cores Semânticas / Status */
+            --color-primary: #0ea5e9;   /* Azul Elétrico */
+            --color-success: #10b981;   /* Esmeralda (Estável) */
+            --color-warning: #f59e0b;   /* Âmbar (Atenção) */
+            --color-danger: #ef4444;    /* Vermelho (Crítico) */
+            
+            /* Espaçamentos e Raios */
+            --radius-sm: 6px;
+            --radius-md: 10px;
+            --radius-lg: 14px;
+            --transition: all 0.2s ease-in-out;
+
+            /* Compatibilidade de Transição */
+            --text-main: var(--text-primary);
             --glass-bg: rgba(20, 30, 55, 0.48);
             --glass-bg-inner: rgba(255, 255, 255, 0.04);
             --glass-border: rgba(255, 255, 255, 0.12);
             --glass-border-highlight: rgba(255, 255, 255, 0.22);
             --glass-shadow: 0 12px 36px 0 rgba(0, 0, 0, 0.42);
-            --text-main: #f8fafc;
-            --text-muted: rgba(226, 232, 240, 0.65);
-            --accent-cyan: #38bdf8;
+            --accent-cyan: var(--color-primary);
             --accent-blue: #60a5fa;
             --accent-purple: #c084fc;
         }
 
-        * { box-sizing: border-box; }
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
 
         body {
-            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-            margin: 0;
+            background-color: var(--bg-main);
+            color: var(--text-primary);
+            font-family: 'Inter', system-ui, -apple-system, sans-serif;
+            font-size: 14px;
+            line-height: 1.5;
             padding: 1.5rem 2rem;
-            color: var(--text-main);
-            min-height: 100vh;
-            background-color: #060b19;
-            background-image:
-                radial-gradient(at 12% 15%, rgba(14, 165, 233, 0.22) 0px, transparent 45%),
-                radial-gradient(at 88% 20%, rgba(99, 102, 241, 0.18) 0px, transparent 50%),
-                radial-gradient(at 50% 85%, rgba(16, 185, 129, 0.12) 0px, transparent 55%),
-                linear-gradient(160deg, #050814 0%, #0b1736 50%, #071024 100%);
-            background-attachment: fixed;
+            overflow-x: hidden;
+        }
+
+        /* Garante alinhamento numérico estável em painéis meteorológicos */
+        .tabular-nums, .metric-value, .temperature {
+            font-variant-numeric: tabular-nums;
         }
 
         @media (max-width: 768px) { body { padding: 1rem; } }
+
+        /* 3. Layout Estrutural (Grid de Comando) */
+        .app-container {
+            display: grid;
+            grid-template-rows: 60px 1fr;
+            grid-template-columns: 320px 1fr;
+            height: 100vh;
+            width: 100vw;
+        }
+
+        /* Cabeçalho Superior */
+        .app-header {
+            grid-column: 1 / -1;
+            background-color: var(--bg-surface);
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 20px;
+            z-index: 1000;
+        }
+
+        .brand-title {
+            font-size: 16px;
+            font-weight: 700;
+            letter-spacing: 0.05em;
+            color: var(--text-primary);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .brand-title span {
+            color: var(--color-primary);
+        }
+
+        /* Painel Lateral (Sidebar de Dados / Corredores) */
+        .sidebar-panel {
+            grid-row: 2;
+            grid-column: 1;
+            background-color: var(--bg-surface);
+            border-right: 1px solid var(--border-color);
+            overflow-y: auto;
+            padding: 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        /* Área Principal (Mapa e Camadas Sinóticas) */
+        .main-content {
+            grid-row: 2;
+            grid-column: 2;
+            position: relative;
+            background-color: var(--bg-main);
+        }
 
         header {
             display: flex;
@@ -204,18 +291,63 @@
         }
         @media (max-width: 1080px) { .grid-top { grid-template-columns: 1fr; } }
 
+        /* Cards de Informação */
         .card {
-            background: var(--glass-bg);
-            backdrop-filter: blur(18px);
-            -webkit-backdrop-filter: blur(18px);
-            border: 1px solid var(--glass-border);
-            border-top: 1px solid var(--glass-border-highlight);
-            border-radius: 22px;
-            padding: 1.4rem;
-            box-shadow: var(--glass-shadow);
+            background-color: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 14px;
+            transition: var(--transition);
             margin-bottom: 1.5rem;
         }
+
         .grid-top .card { margin-bottom: 0; }
+
+        .card:hover {
+            border-color: rgba(14, 165, 233, 0.4);
+        }
+
+        .card-title {
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: var(--text-secondary);
+            margin-bottom: 8px;
+        }
+
+        /* Indicador de Sincronização Ativa (Pulso Live) */
+        .live-indicator {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+
+        .pulse-dot {
+            width: 8px;
+            height: 8px;
+            background-color: var(--color-success);
+            border-radius: 50%;
+            box-shadow: 0 0 0 rgba(16, 185, 129, 0.4);
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0% {
+                transform: scale(0.95);
+                box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7);
+            }
+            70% {
+                transform: scale(1);
+                box-shadow: 0 0 0 6px rgba(16, 185, 129, 0);
+            }
+            100% {
+                transform: scale(0.95);
+                box-shadow: 0 0 0 0 rgba(16, 185, 129, 0);
+            }
+        }
 
         .card-header {
             display: flex;
@@ -269,18 +401,24 @@
             border: 1px solid rgba(255, 255, 255, 0.05);
         }
 
-        /* Mapa Estilizado com Filtro Dark sobre OpenStreetMap */
-        #map {
-            height: 395px;
+        /* Garante que o cartão do mapa respeita os limites e oculta excessos */
+        .card-map, .map-wrapper {
+            position: relative;
             width: 100%;
-            border-radius: 16px;
-            border: 1px solid var(--glass-border);
-            box-shadow: inset 0 2px 10px rgba(0,0,0,0.4);
-            background: #0b1528;
+            background-color: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 12px;
+            margin-bottom: 16px;
+            overflow: hidden;
         }
 
-        #map .leaflet-tile-pane {
-            filter: invert(100%) hue-rotate(180deg) brightness(92%) contrast(88%);
+        /* Define uma altura fixa ideal para o Leaflet não esticar indefinidamente */
+        #map {
+            width: 100%;
+            height: 450px; /* Ajuste para 400px ou 450px conforme a sua preferência visual */
+            border-radius: var(--radius-sm);
+            z-index: 1;
         }
 
         .map-legend {
@@ -325,28 +463,50 @@
         tbody tr:hover { background: rgba(255, 255, 255, 0.04); }
         th { color: var(--text-muted); font-weight: 600; font-size: 0.74rem; text-transform: uppercase; letter-spacing: 0.06em; }
 
+        /* Badges de Status dos Corredores / Severidade */
         .badge {
-            display: inline-block;
-            white-space: nowrap;
-            text-align: center;
-            padding: 0.28rem 0.7rem;
-            border-radius: 999px;
-            font-size: 0.73rem;
+            display: inline-flex;
+            align-items: center;
+            padding: 3px 8px;
+            border-radius: var(--radius-sm);
+            font-size: 11px;
             font-weight: 600;
-            backdrop-filter: blur(8px);
+            text-transform: uppercase;
+            white-space: nowrap;
         }
+
+        .badge-success { background: rgba(16, 185, 129, 0.15); color: var(--color-success); border: 1px solid rgba(16, 185, 129, 0.3); }
+        .badge-warning { background: rgba(245, 158, 11, 0.15); color: var(--color-warning); border: 1px solid rgba(245, 158, 11, 0.3); }
+        .badge-danger  { background: rgba(239, 68, 68, 0.15);  color: var(--color-danger);  border: 1px solid rgba(239, 68, 68, 0.3); }
+        .badge-info    { background: rgba(14, 165, 233, 0.15); color: #38bdf8; border: 1px solid rgba(14, 165, 233, 0.3); }
+        .badge-dedup   { background: rgba(148, 163, 184, 0.15); color: #94a3b8; border: 1px solid rgba(148, 163, 184, 0.3); }
 
         .sev-alta { background: rgba(239, 68, 68, 0.18); color: #fca5a5; border: 1px solid rgba(239, 68, 68, 0.45); }
         .sev-media { background: rgba(245, 158, 11, 0.18); color: #fcd34d; border: 1px solid rgba(245, 158, 11, 0.45); }
         .sev-baixa { background: rgba(16, 185, 129, 0.18); color: #6ee7b7; border: 1px solid rgba(16, 185, 129, 0.45); }
         .badge-exp { background: rgba(192, 132, 252, 0.15); color: #e9d5ff; border: 1px solid rgba(192, 132, 252, 0.35); text-transform: none; }
 
+        /* Ajuste fino nos popups do Leaflet para o tema escuro */
         .leaflet-popup-content-wrapper, .leaflet-popup-tip {
-            background: rgba(15, 23, 42, 0.88) !important;
-            backdrop-filter: blur(14px);
-            color: #f8fafc !important;
-            border: 1px solid rgba(255, 255, 255, 0.15);
-            border-radius: 14px !important;
+            background-color: var(--bg-card) !important;
+            color: var(--text-primary) !important;
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.5);
+        }
+
+        .leaflet-popup-content {
+            font-family: 'Inter', sans-serif;
+            font-size: 13px;
+            margin: 12px 16px;
+        }
+
+        .leaflet-container a.leaflet-popup-close-button {
+            color: var(--text-secondary);
+        }
+
+        .leaflet-container a.leaflet-popup-close-button:hover {
+            color: var(--text-primary);
         }
 
         /* Banner clicável de Nova Atualização no Painel 05 */
@@ -370,6 +530,203 @@
             background: linear-gradient(90deg, rgba(14, 165, 233, 0.35), rgba(56, 189, 248, 0.22));
             transform: translateY(-1px);
         }
+
+        /* Seletor de Camadas Sinóticas do Mapa (v0.2) */
+        .map-layer-Swithcer, .map-layer-switcher {
+            display: flex;
+            gap: 0.4rem;
+            flex-wrap: wrap;
+        }
+        .layer-btn {
+            background: rgba(15, 23, 42, 0.65);
+            border: 1px solid rgba(255, 255, 255, 0.14);
+            color: var(--text-muted);
+            padding: 0.35rem 0.7rem;
+            border-radius: 10px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            box-shadow: none;
+        }
+        .layer-btn:hover {
+            color: var(--text-main);
+            border-color: rgba(56, 189, 248, 0.4);
+        }
+        .layer-btn.active {
+            background: linear-gradient(135deg, rgba(14, 165, 233, 0.35), rgba(37, 99, 235, 0.35));
+            border-color: #38bdf8;
+            color: #e0f2fe;
+            box-shadow: 0 0 12px rgba(56, 189, 248, 0.3);
+        }
+        /* Ícones customizados de Vento e Temperatura no Mapa */
+        .wind-vector-marker {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            pointer-events: auto;
+        }
+        .wind-arrow-circle {
+            width: 34px;
+            height: 34px;
+            border-radius: 50%;
+            background: rgba(15, 23, 42, 0.85);
+            border: 2px solid #38bdf8;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 0 12px rgba(56, 189, 248, 0.45);
+        }
+        .wind-label-pill {
+            margin-top: 2px;
+            background: rgba(15, 23, 42, 0.9);
+            border: 1px solid rgba(255, 255, 255, 0.18);
+            color: #f8fafc;
+            font-size: 0.68rem;
+            font-weight: 700;
+            padding: 1px 6px;
+            border-radius: 999px;
+            white-space: nowrap;
+        }
+        .thermal-badge-marker {
+            background: rgba(15, 23, 42, 0.82);
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            color: #fff;
+            padding: 2px 7px;
+            border-radius: 999px;
+            font-size: 0.75rem;
+            font-weight: 700;
+            white-space: nowrap;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.5);
+            text-align: center;
+        }
+        .map-legend-bar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            font-size: 0.76rem;
+            color: var(--text-muted);
+            margin-top: 0.65rem;
+            padding: 0.45rem 0.75rem;
+            background: rgba(15, 23, 42, 0.45);
+            border-radius: 10px;
+            border: 1px solid rgba(255, 255, 255, 0.06);
+        }
+
+        /* Controle de rolagem e selos dos 7 Corredores Rodoviários (v0.2) */
+        #trafficList {
+            max-height: 360px;
+            overflow-y: auto;
+            padding-right: 0.35rem;
+        }
+        .traffic-status-pill {
+            display: inline-block;
+            padding: 0.18rem 0.55rem;
+            border-radius: 999px;
+            font-size: 0.72rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.03em;
+        }
+        .status-ok {
+            background: rgba(34, 197, 94, 0.16);
+            color: #4ade80;
+            border: 1px solid rgba(34, 197, 94, 0.35);
+        }
+        .status-warn {
+            background: rgba(250, 204, 21, 0.16);
+            color: #facc15;
+            border: 1px solid rgba(250, 204, 21, 0.35);
+        }
+        .status-crit {
+            background: rgba(239, 68, 68, 0.18);
+            color: #f87171;
+            border: 1px solid rgba(239, 68, 68, 0.4);
+        }
+
+        /* Estilos do Módulo 07 - Inteligência Climática e Histórico Mensal */
+        .card-full-width {
+            grid-column: 1 / -1;
+        }
+        .climate-filters {
+            display: flex;
+            gap: 0.6rem;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+        .climate-filters label {
+            font-size: 0.8rem;
+            color: var(--text-muted);
+        }
+        .climate-filters select {
+            padding: 0.35rem 0.65rem;
+            font-size: 0.82rem;
+        }
+        .climate-outlook-banner {
+            margin-bottom: 1rem;
+            padding: 0.75rem 1rem;
+            border-radius: 12px;
+            background: rgba(14, 165, 233, 0.12);
+            border: 1px solid rgba(56, 189, 248, 0.3);
+            font-size: 0.86rem;
+            color: #e0f2fe;
+        }
+        .climate-kpi-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 0.85rem;
+            margin-bottom: 1.2rem;
+        }
+        .climate-charts-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+            gap: 1.2rem;
+        }
+        .climate-chart-box {
+            background: rgba(15, 23, 42, 0.45);
+            padding: 0.9rem;
+            border-radius: 12px;
+            border: 1px solid rgba(255, 255, 255, 0.06);
+        }
+        .climate-chart-title {
+            font-size: 0.8rem;
+            font-weight: 600;
+            color: var(--text-muted);
+            margin-bottom: 0.5rem;
+        }
+        .climate-canvas-wrap {
+            height: 220px;
+        }
+
+        /* Paginação e Controles do Painel 06 */
+        .d-flex { display: flex; }
+        .justify-content-between { justify-content: space-between; }
+        .align-items-center { align-items: center; }
+        .btn-group { display: inline-flex; gap: 6px; }
+        .btn {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            color: var(--text-primary);
+            padding: 4px 10px;
+            border-radius: var(--radius-sm);
+            font-size: 12px;
+            cursor: pointer;
+            transition: var(--transition);
+        }
+        .btn:hover:not(:disabled) {
+            background: var(--bg-card-hover);
+            border-color: var(--color-primary);
+        }
+        .btn:disabled {
+            opacity: 0.45;
+            cursor: not-allowed;
+        }
+        .badge-primary {
+            background: rgba(14, 165, 233, 0.2);
+            color: var(--color-primary);
+            border: 1px solid rgba(14, 165, 233, 0.4);
+        }
     </style>
 </head>
 <body>
@@ -392,10 +749,14 @@
 
             <label for="regionSelect" style="font-size: 0.85rem; color: var(--text-muted);">Localidade:</label>
             <select id="regionSelect">
-                {% for r in regions %}
-                <option value="{{ r.id }}" data-lat="{{ r.latitude }}" data-lon="{{ r.longitude }}">
-                    {{ r.municipality }} — {{ r.name }}
-                </option>
+                {% for municipality, regs in regions|groupby('municipality') %}
+                <optgroup label="📍 {{ municipality|upper }}">
+                    {% for r in regs %}
+                    <option value="{{ r.id }}" data-lat="{{ r.latitude }}" data-lon="{{ r.longitude }}">
+                        {{ r.name }}
+                    </option>
+                    {% endfor %}
+                </optgroup>
                 {% endfor %}
             </select>
 
@@ -447,18 +808,26 @@
             </div>
         </div>
 
-        <!-- 02. MAPA INTERATIVO -->
-        <div class="card">
-            <div class="card-header">
-                <h2>02. Mapa Geoespacial Interativo</h2>
-                <span class="meta-info">Toque em um ponto para focar</span>
+        <!-- 02. MAPA INTERATIVO COM CAMADAS SINÓTICAS (v0.2) -->
+        <div class="card card-map">
+            <div class="card-header" style="flex-wrap: wrap; gap: 0.5rem;">
+                <h2>02. Mapa Geoespacial da Zona Sul</h2>
+                <div class="map-layer-Swithcer">
+                    <button type="button" class="layer-btn active" id="btnLayerRisk" onclick="setMapLayer('risk')">
+                        🎯 Risco & Condições
+                    </button>
+                    <button type="button" class="layer-btn" id="btnLayerWind" onclick="setMapLayer('wind')">
+                        💨 Vetores de Vento
+                    </button>
+                    <button type="button" class="layer-btn" id="btnLayerThermal" onclick="setMapLayer('thermal')">
+                        🌡️ Massas de Ar
+                    </button>
+                </div>
             </div>
             <div id="map"></div>
-            <div class="map-legend">
-                <span><i class="dot" style="background:#10b981; color:#10b981;"></i>Normal</span>
-                <span><i class="dot" style="background:#f59e0b; color:#f59e0b;"></i>Atenção</span>
-                <span><i class="dot" style="background:#ef4444; color:#ef4444;"></i>Alerta Severo</span>
-                <span><i class="dot" style="background:#a855f7; color:#a855f7;"></i>Ocorrência Histórica</span>
+            <div id="mapDynamicLegend" class="map-legend-bar">
+                <span>Clique em um ponto para focar a localidade no painel</span>
+                <span>🟢 Baixo • 🟡 Médio • 🟠 Alto • 🔴 Muito Alto</span>
             </div>
         </div>
     </div>
@@ -499,41 +868,30 @@
             </div>
 
             <!-- AVISO INTERATIVO DE NOVA ATUALIZAÇÃO (Oculto por padrão) -->
-            <div id="trafficUpdateBanner" class="update-banner" onclick="loadTrafficPanel()">
+            <div id="trafficUpdateBanner" class="update-banner" onclick="loadTraffic()">
                 <span>🔔 <strong>Nova atualização disponível</strong> nas condições das rodovias</span>
                 <span style="text-decoration: underline; font-weight: 600; color: #38bdf8;">Clique para atualizar</span>
             </div>
 
             <div id="trafficCorridors" style="font-size:0.8rem; color:var(--text-muted); margin-bottom:0.85rem;"></div>
-            <div style="overflow-x:auto;">
-                <table>
-                    <thead>
-                        <tr>
-                            <th>Rodovia / Boletim</th>
-                            <th>Município</th>
-                            <th>Condição</th>
-                            <th>Órgão</th>
-                        </tr>
-                    </thead>
-                    <tbody id="trafficTableBody">
-                        <tr><td colspan="4">Consultando boletins rodoviários...</td></tr>
-                    </tbody>
-                </table>
-            </div>
+            <ul id="trafficList" style="list-style:none; padding:0; margin:0; display:flex; flex-direction:column; gap:0.65rem;">
+                <li style="color:var(--text-muted); padding: 0.5rem 0;">Consultando boletins dos corredores rodoviários...</li>
+            </ul>
         </div>
     </div>
 
-    <!-- TERCEIRA LINHA: 06. CENTRAL DE ALERTAS -->
-    <div class="card">
-        <div class="card-header">
-            <h2>06. Alertas Automáticos & Controle de Duplicidade</h2>
-            <span class="meta-info" id="alertsMeta">Regras: Chuva 24h ≥ 25mm | Vento ≥ 55km/h | Risco ≥ 50 pts</span>
+    <!-- PAINEL 06: ALERTAS AUTOMÁTICOS & DEDUPLICAÇÃO -->
+    <section class="card panel-06 panel-alerts" id="panel-06">
+        <div class="panel-header card-header d-flex justify-content-between align-items-center">
+            <h2 class="card-title mb-0" style="margin: 0; font-size: 0.92rem;">06. ALERTAS AUTOMÁTICOS &amp; CONTROLE DE DUPLICIDADE</h2>
+            <span class="badge badge-primary" id="alertsTotalCount">0 Registos</span>
         </div>
-        <div style="overflow-x: auto;">
-            <table>
+
+        <div class="table-responsive">
+            <table class="alert-table table table-dark table-hover mb-0" id="alertsTable">
                 <thead>
                     <tr>
-                        <th>Horário (BRT)</th>
+                        <th>Data/Hora</th>
                         <th>Município / Região</th>
                         <th>Regra Acionada</th>
                         <th>Canal</th>
@@ -541,9 +899,101 @@
                     </tr>
                 </thead>
                 <tbody id="alertsTableBody">
-                    <tr><td colspan="5">Verificando regras de alerta...</td></tr>
+                    <!-- Linhas inseridas pelo JavaScript -->
                 </tbody>
             </table>
+        </div>
+
+        <!-- Barra de Navegação Paginada -->
+        <div class="pagination-controls" style="display: flex; justify-content: space-between; align-items: center; margin-top: 10px; padding: 8px 4px; border-top: 1px solid rgba(255,255,255,0.08);">
+            <span id="alertsPageInfo" style="font-size: 12px; color: #94a3b8;">Página 1 de 1</span>
+            <div style="display: flex; gap: 8px;">
+                <button id="btnAlertsPrev" class="btn-page btn btn-outline-secondary" onclick="fetchAlertsPage(currentAlertsPage - 1)" disabled style="padding: 4px 10px; font-size: 12px; cursor: pointer;">&laquo; Anterior</button>
+                <button id="btnAlertsNext" class="btn-page btn btn-outline-secondary" onclick="fetchAlertsPage(currentAlertsPage + 1)" disabled style="padding: 4px 10px; font-size: 12px; cursor: pointer;">Próxima &raquo;</button>
+            </div>
+        </div>
+    </section>
+
+    <!-- 07. HISTÓRICO CLIMÁTICO MENSAL & PROJEÇÃO SAZONAL -->
+    <div class="card card-full-width">
+        <div class="card-header">
+            <h2>07. Histórico Climático Mensal & Projeção Climatológica (2000–2026)</h2>
+
+            <div class="climate-filters">
+                <label for="climateMonthSelect">Mês:</label>
+                <select id="climateMonthSelect" onchange="onClimateFilterChange()">
+                    <option value="1">01 - Janeiro</option>
+                    <option value="2">02 - Fevereiro</option>
+                    <option value="3">03 - Março</option>
+                    <option value="4">04 - Abril</option>
+                    <option value="5">05 - Maio</option>
+                    <option value="6">06 - Junho</option>
+                    <option value="7">07 - Julho</option>
+                    <option value="8">08 - Agosto</option>
+                    <option value="9">09 - Setembro</option>
+                    <option value="10">10 - Outubro</option>
+                    <option value="11">11 - Novembro</option>
+                    <option value="12">12 - Dezembro</option>
+                </select>
+
+                <label for="climateYearSelect">Ano / Modo:</label>
+                <select id="climateYearSelect" onchange="onClimateFilterChange()">
+                    <option value="0">🔮 Projeção / Normal Climatológica</option>
+                </select>
+            </div>
+        </div>
+
+        <!-- Faixa de Diagnóstico Climatológico -->
+        <div id="climateOutlookBanner" class="climate-outlook-banner">
+            Carregando inteligência climática regional...
+        </div>
+
+        <!-- 4 Cartões de Indicadores (KPIs) -->
+        <div class="climate-kpi-grid">
+            <div class="kpi-box">
+                <div class="label">Chuva Esperada (Média Histórica)</div>
+                <div class="value" id="climNormRain">-- mm</div>
+                <small id="climNormDays" style="color: var(--text-muted);">-- dias de chuva</small>
+            </div>
+
+            <div class="kpi-box">
+                <div class="label">Chuva Registrada no Período</div>
+                <div class="value" id="climRecRain">-- mm</div>
+                <small id="climAnomalyRain" style="color: var(--text-muted);">Anomalia: --</small>
+            </div>
+
+            <div class="kpi-box">
+                <div class="label">Temperatura Média Histórica</div>
+                <div class="value" id="climNormTemp">-- °C</div>
+                <small id="climNormTempRange" style="color: var(--text-muted);">Mín: -- / Máx: --</small>
+            </div>
+
+            <div class="kpi-box">
+                <div class="label">Extremos do Mês (2000–2026)</div>
+                <div class="value" id="climWettestYear" style="font-size: 1.05rem;">--</div>
+                <small id="climExtremesDetail" style="color: var(--text-muted);">Mais seco: --</small>
+            </div>
+        </div>
+
+        <!-- 2 Gráficos Comparativos Lado a Lado -->
+        <div class="climate-charts-grid">
+            <div class="climate-chart-box">
+                <div class="climate-chart-title">
+                    📅 Normal Climatológica Anual da Cidade (Jan–Dez)
+                </div>
+                <div class="climate-canvas-wrap">
+                    <canvas id="chartAnnualNormals"></canvas>
+                </div>
+            </div>
+
+            <div class="climate-chart-box">
+                <div class="climate-chart-title">
+                    📈 Série Histórica do Mês Selecionado (2000–2026)
+                </div>
+                <div class="climate-canvas-wrap">
+                    <canvas id="chartMonthlySeries"></canvas>
+                </div>
+            </div>
         </div>
     </div>
 
@@ -559,8 +1009,12 @@
                 <label>Filtrar por Localidade</label>
                 <select id="occRegionFilter">
                     <option value="">Todas as regiões da Zona Sul</option>
-                    {% for r in regions %}
-                    <option value="{{ r.id }}">{{ r.municipality }} — {{ r.name }}</option>
+                    {% for municipality, regs in regions|groupby('municipality') %}
+                    <optgroup label="📍 {{ municipality|upper }}">
+                        {% for r in regs %}
+                        <option value="{{ r.id }}">{{ r.name }}</option>
+                        {% endfor %}
+                    </optgroup>
                     {% endfor %}
                 </select>
             </div>
@@ -604,8 +1058,59 @@
     <script>
         let chartInstance = null;
         let map = null;
-        let regionLayerGroup = null;
+        let markersLayer = null;
         let occurrenceLayerGroup = null;
+        let activeMapLayer = 'risk'; // 'risk' | 'wind' | 'thermal'
+        let lastMapSummaryData = [];
+        let thermalOverlay = null;
+
+        // Substituição/Ajuste na função que popula o #regionSelect
+        function populateRegionDropdown(regions) {
+            const select = document.getElementById('regionSelect');
+            if (!select) return;
+
+            select.innerHTML = '<option value="" disabled selected>Escolha uma localidade...</option>';
+
+            // Agrupa as regiões por cidade mantendo a compatibilidade
+            const grouped = regions.reduce((acc, reg) => {
+                const city = reg.city || reg.municipality || 'Outros';
+                (acc[city] = acc[city] || []).push(reg);
+                return acc;
+            }, {});
+
+            Object.keys(grouped).sort().forEach(city => {
+                const group = document.createElement('optgroup');
+                group.label = `📍 ${city.toUpperCase()}`;
+
+                grouped[city].forEach(reg => {
+                    const opt = document.createElement('option');
+                    opt.value = reg.id; // Mantém o ID numérico que o loadClimateHistory() espera
+                    opt.textContent = reg.name;
+                    if (reg.latitude !== undefined) opt.setAttribute('data-lat', reg.latitude);
+                    if (reg.longitude !== undefined) opt.setAttribute('data-lon', reg.longitude);
+                    group.appendChild(opt);
+                });
+
+                select.appendChild(group);
+            });
+
+            // Se houver uma região padrão pré-selecionada (ex: Rio Grande - Centro / ID 1)
+            const savedId = localStorage.getItem('climae_preferred_region_id');
+            if (savedId && select.querySelector(`option[value="${savedId}"]`)) {
+                select.value = savedId;
+                if (typeof loadClimateHistory === 'function') {
+                    loadClimateHistory(savedId);
+                }
+            } else if (regions.length > 0) {
+                const firstOption = select.querySelector('option:not([disabled])');
+                if (firstOption) {
+                    select.value = firstOption.value;
+                    if (typeof loadClimateHistory === 'function') {
+                        loadClimateHistory(firstOption.value);
+                    }
+                }
+            }
+        }
 
         function formatBRT(isoString, onlyHour = false) {
             if (!isoString) return "--";
@@ -620,57 +1125,292 @@
             return dt.toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo', dateStyle: 'short', timeStyle: 'short' });
         }
 
+        // Layer de Canvas Customizada no Leaflet para Interpolar Massas de Ar Quente e Frio (IDW)
+        const ThermalFieldOverlay = L.Layer.extend({
+            initialize: function (points) {
+                this._points = points || [];
+            },
+            setPoints: function (points) {
+                this._points = points || [];
+                this._redraw();
+            },
+            onAdd: function (map) {
+                this._map = map;
+                this._canvas = L.DomUtil.create('canvas', 'leaflet-layer');
+                this._canvas.style.pointerEvents = 'none';
+                this._canvas.style.zIndex = 250;
+                map.getPanes().overlayPane.appendChild(this._canvas);
+                map.on('moveend zoomend resize', this._reset, this);
+                this._reset();
+            },
+            onRemove: function (map) {
+                L.DomUtil.remove(this._canvas);
+                map.off('moveend zoomend resize', this._reset, this);
+            },
+            _reset: function () {
+                if (!this._map) return;
+                const topLeft = this._map.containerPointToLayerPoint([0, 0]);
+                L.DomUtil.setPosition(this._canvas, topLeft);
+                const size = this._map.getSize();
+                this._canvas.width = size.x;
+                this._canvas.height = size.y;
+                this._redraw();
+            },
+            _tempToRGB: function (t, minT, maxT) {
+                // Escala Sinótica: Azul Profundo (Frio) -> Ciano -> Verde/Amarelo -> Laranja/Vermelho (Massa Quente)
+                const span = Math.max(maxT - minT, 4.0);
+                const norm = Math.max(0, Math.min(1, (t - minT) / span));
+                if (norm < 0.35) {
+                    const k = norm / 0.35;
+                    return [Math.round(14 + 20 * k), Math.round(116 + 95 * k), 245]; // Azul -> Ciano
+                } else if (norm < 0.68) {
+                    const k = (norm - 0.35) / 0.33;
+                    return [Math.round(34 + 210 * k), Math.round(211 - 20 * k), Math.round(235 - 190 * k)]; // Ciano -> Amarelo
+                } else {
+                    const k = (norm - 0.68) / 0.32;
+                    return [249, Math.round(191 - 125 * k), Math.round(45 - 25 * k)]; // Amarelo -> Laranja/Vermelho
+                }
+            },
+            _redraw: function () {
+                if (!this._map || !this._canvas) return;
+                const ctx = this._canvas.getContext('2d');
+                const w = this._canvas.width;
+                const h = this._canvas.height;
+                ctx.clearRect(0, 0, w, h);
+
+                const validPts = this._points.filter(p => p.temperature_c !== null && p.temperature_c !== undefined);
+                if (validPts.length === 0) return;
+
+                const temps = validPts.map(p => p.temperature_c);
+                const minT = Math.min(...temps) - 0.8;
+                const maxT = Math.max(...temps) + 0.8;
+
+                // Converte coordenadas Lat/Lon para pixels na tela
+                const screenPts = validPts.map(p => {
+                    const pt = this._map.latLngToContainerPoint([p.latitude, p.longitude]);
+                    return { x: pt.x, y: pt.y, t: p.temperature_c };
+                });
+
+                // Renderiza malha interpolada IDW (Inverse Distance Weighting) em baixa resolução e escala com suavização
+                const scale = 6;
+                const sw = Math.ceil(w / scale);
+                const sh = Math.ceil(h / scale);
+                const offCanvas = document.createElement('canvas');
+                offCanvas.width = sw;
+                offCanvas.height = sh;
+                const offCtx = offCanvas.getContext('2d');
+                const imgData = offCtx.createImageData(sw, sh);
+                const data = imgData.data;
+
+                for (let py = 0; py < sh; py++) {
+                    const y = py * scale;
+                    for (let px = 0; px < sw; px++) {
+                        const x = px * scale;
+                        let weightSum = 0;
+                        let tempSum = 0;
+                        let minDistPx = Infinity;
+
+                        for (let i = 0; i < screenPts.length; i++) {
+                            const dx = x - screenPts[i].x;
+                            const dy = y - screenPts[i].y;
+                            const distSq = dx * dx + dy * dy + 80;
+                            const dist = Math.sqrt(distSq);
+                            if (dist < minDistPx) minDistPx = dist;
+                            const w_i = 1.0 / (distSq * 1.15);
+                            weightSum += w_i;
+                            tempSum += screenPts[i].t * w_i;
+                        }
+
+                        // Esmaece suavemente fora do perímetro da Zona Sul do RS
+                        const maxRadiusPx = 190;
+                        if (minDistPx > maxRadiusPx) continue;
+
+                        const interpTemp = tempSum / weightSum;
+                        const [r, g, b] = this._tempToRGB(interpTemp, minT, maxT);
+                        const fade = Math.max(0, 1 - Math.pow(minDistPx / maxRadiusPx, 2.2));
+                        const alpha = Math.round(fade * 135);
+
+                        const idx = (py * sw + px) * 4;
+                        data[idx] = r;
+                        data[idx + 1] = g;
+                        data[idx + 2] = b;
+                        data[idx + 3] = alpha;
+                    }
+                }
+
+                offCtx.putImageData(imgData, 0, 0);
+                ctx.imageSmoothingEnabled = true;
+                ctx.drawImage(offCanvas, 0, 0, sw, sh, 0, 0, w, h);
+            }
+        });
+
         function initMap() {
-            map = L.map('map').setView([-32.0350, -52.3376], 8);
-            // OpenStreetMap oficial e 100% gratuito (estilizado dark via filtro CSS na .leaflet-tile-pane)
-            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-                maxZoom: 18,
-                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank">OpenStreetMap</a> contributors'
+            // Inicializa o mapa centrado na Zona Sul do RS (Pelotas/Rio Grande)
+            map = L.map('map', {
+                zoomControl: false, // Desativa o padrão para reposicionarmos
+                attributionControl: false // Limpa a atribuição excessiva se preferir minimalista
+            }).setView([-31.85, -52.40], 9); // Coordenadas centrais da Zona Sul
+
+            // Adiciona o controle de zoom em uma posição discreta (canto inferior direito)
+            L.control.zoom({ position: 'bottomright' }).addTo(map);
+
+            // Camada CartoDB Dark Matter com a sua chave de API integrada
+            L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/dark_all/{z}/{x}/{y}.png?key=cb1_4tty_1_7ecceb9d4a702854e1ce9e46', {
+                maxZoom: 19,
+                subdomains: 'abcd',
+                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
             }).addTo(map);
 
-            regionLayerGroup = L.layerGroup().addTo(map);
+            // Pequena atribuição compacta opcional no canto inferior esquerdo
+            L.control.attribution({ position: 'bottomleft', prefix: 'CLIMAE Core' }).addTo(map);
+
+            markersLayer = L.layerGroup().addTo(map);
             occurrenceLayerGroup = L.layerGroup().addTo(map);
+            thermalOverlay = new ThermalFieldOverlay([]);
         }
 
-        function getRegionColor(item) {
-            if (item.precipitation_mm >= 5 || item.wind_speed_kmh >= 55 || item.rain_probability >= 80) return "#ef4444";
-            if (item.precipitation_mm > 0.5 || item.wind_speed_kmh >= 35 || item.rain_probability >= 50) return "#f59e0b";
-            return "#10b981";
+        function getRiskColor(level) {
+            if (level === 'Muito alto') return '#ef4444';
+            if (level === 'Alto') return '#fb923c';
+            if (level === 'Médio') return '#facc15';
+            return '#4ade80';
+        }
+
+        function degreesToCardinal(deg) {
+            if (deg === null || deg === undefined) return 'N/D';
+            const dirs = ['N', 'NE', 'L', 'SE', 'S', 'SO', 'O', 'NO'];
+            return dirs[Math.round(((deg %= 360) < 0 ? deg + 360 : deg) / 45) % 8];
+        }
+
+        function setMapLayer(layerName) {
+            activeMapLayer = layerName;
+            document.getElementById('btnLayerRisk').classList.toggle('active', layerName === 'risk');
+            document.getElementById('btnLayerWind').classList.toggle('active', layerName === 'wind');
+            document.getElementById('btnLayerThermal').classList.toggle('active', layerName === 'thermal');
+
+            const legend = document.getElementById('mapDynamicLegend');
+            if (layerName === 'risk') {
+                legend.innerHTML = `
+                    <span>Camada: <strong>Risco & Condições Atuais</strong></span>
+                    <span>🟢 Baixo • 🟡 Médio • 🟠 Alto • 🔴 Muito Alto</span>
+                `;
+            } else if (layerName === 'wind') {
+                legend.innerHTML = `
+                    <span>Camada: <strong>Vetores de Vento (Direção para onde sopra)</strong></span>
+                    <span>🔵 Fraco (&lt;25 km/h) • 🟡 Moderado (25–45 km/h) • 🔴 Forte (&gt;45 km/h)</span>
+                `;
+            } else if (layerName === 'thermal') {
+                legend.innerHTML = `
+                    <span>Camada: <strong>Massas de Ar (Gradiente Térmico Regional)</strong></span>
+                    <span>🟦 Massa Mais Fria ➔ 🟩 Transição ➔ 🟧 Massa Mais Quente</span>
+                `;
+            }
+
+            renderMapByActiveLayer();
+        }
+
+        function renderMapByActiveLayer() {
+            if (!markersLayer) return;
+            markersLayer.clearLayers();
+
+            if (activeMapLayer === 'thermal') {
+                if (!map.hasLayer(thermalOverlay)) {
+                    thermalOverlay.addTo(map);
+                }
+                thermalOverlay.setPoints(lastMapSummaryData);
+            } else {
+                if (map.hasLayer(thermalOverlay)) {
+                    map.removeLayer(thermalOverlay);
+                }
+            }
+
+            lastMapSummaryData.forEach(item => {
+                let marker;
+
+                if (activeMapLayer === 'risk') {
+                    const color = getRiskColor(item.risk_level);
+                    marker = L.circleMarker([item.latitude, item.longitude], {
+                        radius: 10,
+                        fillColor: color,
+                        color: '#0f172a',
+                        weight: 2,
+                        fillOpacity: 0.9
+                    });
+                } else if (activeMapLayer === 'wind') {
+                    const speed = item.wind_speed ?? 0;
+                    const fromDeg = item.wind_direction ?? 0;
+                    // Na meteorologia, wind_direction é de onde o vento VEM. Somamos 180° para apontar para onde ele SOPRA.
+                    const blowToDeg = (fromDeg + 180) % 360;
+                    const cardinalFrom = degreesToCardinal(fromDeg);
+
+                    let borderColor = '#38bdf8';
+                    if (speed >= 45) borderColor = '#ef4444';
+                    else if (speed >= 25) borderColor = '#facc15';
+
+                    const iconHtml = `
+                        <div class="wind-vector-marker">
+                            <div class="wind-arrow-circle" style="border-color: ${borderColor};">
+                                <svg width="20" height="20" viewBox="0 0 24 24" style="transform: rotate(${blowToDeg}deg);">
+                                    <path d="M12 2L19 21L12 17L5 21L12 2Z" fill="${borderColor}"/>
+                                </svg>
+                            </div>
+                            <span class="wind-label-pill">${cardinalFrom} ${speed.toFixed(0)} km/h</span>
+                        </div>
+                    `;
+                    const icon = L.divIcon({
+                        html: iconHtml,
+                        className: '',
+                        iconSize: [70, 52],
+                        iconAnchor: [35, 26]
+                    });
+                    marker = L.marker([item.latitude, item.longitude], { icon });
+                } else if (activeMapLayer === 'thermal') {
+                    const temp = item.temperature_c !== null ? `${item.temperature_c.toFixed(1)} °C` : '--';
+                    const iconHtml = `<div class="thermal-badge-marker">${temp}</div>`;
+                    const icon = L.divIcon({
+                        html: iconHtml,
+                        className: '',
+                        iconSize: [64, 24],
+                        iconAnchor: [32, 12]
+                    });
+                    marker = L.marker([item.latitude, item.longitude], { icon });
+                }
+
+                if (marker) {
+                    const cardinal = degreesToCardinal(item.wind_direction);
+                    marker.bindPopup(`
+                        <div style="font-family: Inter, sans-serif; color: #f8fafc; line-height: 1.5; font-size: 0.84rem;">
+                            <strong style="color: #38bdf8; font-size: 0.92rem;">${item.municipality} (${item.name})</strong><br>
+                            🌡️ Temp: <strong>${item.temperature_c ?? '--'} °C</strong> | 💧 Umid: <strong>${item.humidity_percent ?? '--'}%</strong><br>
+                            💨 Vento: <strong>${item.wind_speed ?? '--'} km/h</strong> (Origem: ${cardinal} / ${item.wind_direction ?? '--'}°)<br>
+                            🌧️ Chuva 24h: <strong>${item.rain_next_24h_mm} mm</strong><br>
+                            ⚠️ Risco: <strong style="color: ${getRiskColor(item.risk_level)};">${item.risk_level} (${item.risk_score})</strong>
+                        </div>
+                    `);
+
+                    marker.on('click', () => {
+                        document.getElementById('regionSelect').value = item.region_id;
+                        localStorage.setItem('climae_preferred_region_id', item.region_id);
+                        onRegionChanged(item.region_id);
+                    });
+
+                    marker.addTo(markersLayer);
+                }
+            });
         }
 
         async function loadMapSummary() {
-            const res = await fetch('/api/weather-summary');
-            const data = await res.json();
-            regionLayerGroup.clearLayers();
-
-            data.forEach(item => {
-                const r = item.region;
-                const color = getRegionColor(item);
-
-                const circle = L.circleMarker([r.latitude, r.longitude], {
-                    radius: 11,
-                    fillColor: color,
-                    color: "#ffffff",
-                    weight: 1.5,
-                    opacity: 0.9,
-                    fillOpacity: 0.8
-                });
-
-                circle.bindPopup(`
-                    <div style="font-family:'Inter',sans-serif; font-size:0.85rem;">
-                        <strong>${r.municipality} — ${r.name}</strong><br>
-                        Temp: ${item.temperature_c ?? '--'} °C | Vento: ${item.wind_speed_kmh ?? '--'} km/h<br>
-                        Risco: <strong>${item.risk_level}</strong> (${item.risk_score ?? '--'}/100)
-                    </div>
-                `);
-
-                circle.on('click', () => {
-                    document.getElementById('regionSelect').value = r.id;
-                    onRegionChanged(r.id);
-                });
-
-                regionLayerGroup.addLayer(circle);
-            });
+            try {
+                const res = await fetch('/api/weather-summary');
+                const data = await res.json();
+                lastMapSummaryData = Array.isArray(data) ? data : (data.summary || data.regions || []);
+                if (data && data.alerts && typeof updateAlertsPanel === 'function') {
+                    updateAlertsPanel(data.alerts);
+                }
+                renderMapByActiveLayer();
+            } catch (err) {
+                console.error("Erro ao carregar resumo do mapa:", err);
+            }
         }
 
         async function loadRegionWeather(regionId) {
@@ -791,75 +1531,151 @@
             }
         }
 
+        let lastKnownTrafficTimestamp = null;
         let currentTrafficTimestamp = null;
 
-        async function loadTrafficPanel() {
+        function formatLocalTime(isoString) {
+            return formatBRT(isoString, false);
+        }
+
+        async function loadTraffic() {
             const res = await fetch('/api/traffic');
-            const data = await res.json();
-
-            // Guarda o horário da versão carregada na tela e esconde o banner de aviso
-            currentTrafficTimestamp = data.last_updated_at;
-            document.getElementById('trafficUpdateBanner').style.display = 'none';
-
-            document.getElementById('trafficSourceStatus').innerText =
-                data.last_updated_at ? `Atualizado às ${formatBRT(data.last_updated_at, true)}` : data.source_status;
-            document.getElementById('trafficCorridors').innerHTML =
-                `Corredores monitorados: <strong>${data.corridors_monitored.join(' • ')}</strong>`;
-
-            const tbody = document.getElementById('trafficTableBody');
-            if (!data.events || data.events.length === 0) {
-                tbody.innerHTML = `<tr><td colspan="4" style="color:var(--text-muted);">Nenhum boletim ativo no momento.</td></tr>`;
+            const raw = await res.json();
+            const items = Array.isArray(raw) ? raw : (raw.events || []);
+            const ul = document.getElementById('trafficList');
+            if (!ul) return;
+            if (!items.length) {
+                ul.innerHTML = '<li style="color:var(--text-muted); padding:0.5rem 0;">Sem ocorrências rodoviárias registradas.</li>';
                 return;
             }
 
-            tbody.innerHTML = data.events.map(ev => {
-                let badgeClass = 'sev-baixa';
-                if (ev.status === 'Ativo' || ev.is_stale) badgeClass = 'sev-alta';
-                else if (ev.status === 'Atenção') badgeClass = 'sev-media';
+            const latestTime = (items[0] && (items[0].reported_at || items[0].updated_at));
+            if (latestTime) {
+                lastKnownTrafficTimestamp = latestTime;
+                currentTrafficTimestamp = latestTime;
+            }
+            const banner = document.getElementById('trafficUpdateBanner');
+            if (banner) banner.style.display = 'none';
+
+            const sourceStatusEl = document.getElementById('trafficSourceStatus');
+            if (sourceStatusEl && latestTime) {
+                sourceStatusEl.innerText = `Atualizado às ${formatBRT(latestTime, true)}`;
+            }
+
+            ul.innerHTML = items.map(t => {
+                const st = (t.status || '').toLowerCase();
+                let pillClass = 'status-ok';
+                if (st.includes('crític') || st.includes('suspensão') || st.includes('severo') || st.includes('alerta de alagamento')) {
+                    pillClass = 'status-crit';
+                } else if (st.includes('atenção') || st.includes('restrição') || st.includes('lento')) {
+                    pillClass = 'status-warn';
+                }
+
+                const highwayName = t.highway || t.event_type || 'Rodovia';
+                const sourceName = t.source || 'Telemetria CLIMAE';
+                const timeVal = t.reported_at || t.updated_at || '';
 
                 return `
-                    <tr>
-                        <td>${ev.event_type}</td>
-                        <td>${ev.municipality}</td>
-                        <td><span class="badge ${badgeClass}">${ev.status}</span></td>
-                        <td>${ev.source}</td>
-                    </tr>
+                    <li style="background: rgba(15, 23, 42, 0.45); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 12px; padding: 0.75rem 0.9rem;">
+                        <div style="display:flex; justify-content:space-between; align-items:center; gap:0.5rem; flex-wrap:wrap; margin-bottom:0.25rem;">
+                            <strong style="color: #e2e8f0; font-size: 0.88rem;">🛣️ ${highwayName}</strong>
+                            <span class="traffic-status-pill ${pillClass}">${t.status}</span>
+                        </div>
+                        <div style="color: #cbd5e1; font-size: 0.82rem; line-height: 1.4;">${t.description || t.event_type || ''}</div>
+                        <small style="color:var(--text-muted); font-size: 0.72rem;">Fonte: ${sourceName} • Atualizado às ${formatLocalTime(timeVal)}</small>
+                    </li>
                 `;
             }).join('');
         }
+
+        const loadTrafficPanel = loadTraffic;
 
         // Apenas verifica se há versão nova no banco, SEM recarregar a tabela sozinho
         async function checkForTrafficUpdates() {
             try {
                 const res = await fetch('/api/traffic/check-update');
                 const data = await res.json();
-                if (data.last_updated_at && currentTrafficTimestamp && data.last_updated_at !== currentTrafficTimestamp) {
-                    document.getElementById('trafficUpdateBanner').style.display = 'flex';
+                const latest = data.last_updated_at;
+                const current = lastKnownTrafficTimestamp || currentTrafficTimestamp;
+                if (latest && current && latest !== current) {
+                    const banner = document.getElementById('trafficUpdateBanner');
+                    if (banner) banner.style.display = 'flex';
                 }
             } catch (e) {
                 console.error("Erro ao checar atualização de rodovias:", e);
             }
         }
 
-        async function loadAlerts() {
-            const res = await fetch('/api/alerts');
-            const alerts = await res.json();
-            const tbody = document.getElementById('alertsTableBody');
+        // Estado da paginação do Painel 06
+        let currentAlertsPage = 1;
+        const ALERTS_PER_PAGE = 5;
 
-            if (!alerts || alerts.length === 0) {
-                tbody.innerHTML = `<tr><td colspan="5" style="color:var(--text-muted); text-align:center; padding:1.2rem;">Nenhum limiar crítico ultrapassado nas regiões monitoradas hoje.</td></tr>`;
+        // Função chamada para requisitar uma página específica à API
+        async function fetchAlertsPage(page = 1) {
+            if (page < 1) return;
+
+            try {
+                const response = await fetch(`/api/alerts?page=${page}&per_page=${ALERTS_PER_PAGE}`);
+                if (!response.ok) throw new Error("Falha ao consultar alertas");
+
+                const data = await response.json();
+                currentAlertsPage = data.current_page;
+                renderAlertsTable(data);
+            } catch (err) {
+                console.error("[Painel 06] Erro na paginação de alertas:", err);
+            }
+        }
+
+        // Renderiza estritamente os 5 itens devolvidos pelo servidor
+        function renderAlertsTable(data) {
+            const tbody = document.getElementById("alertsTableBody");
+            const pageInfo = document.getElementById("alertsPageInfo");
+            const totalCount = document.getElementById("alertsTotalCount");
+            const btnPrev = document.getElementById("btnAlertsPrev");
+            const btnNext = document.getElementById("btnAlertsNext");
+
+            if (!tbody) return;
+            tbody.innerHTML = "";
+
+            if (totalCount) {
+                totalCount.textContent = `${data.total} Registos`;
+            }
+
+            if (!data.alerts || data.alerts.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="5" style="text-align: center; color: #94a3b8;">Nenhum alerta registado no momento.</td></tr>';
+                if (pageInfo) pageInfo.textContent = "Página 1 de 1";
+                if (btnPrev) btnPrev.disabled = true;
+                if (btnNext) btnNext.disabled = true;
                 return;
             }
 
-            tbody.innerHTML = alerts.map(a => `
-                <tr>
-                    <td>${formatBRT(a.created_at)}</td>
-                    <td><strong>${a.municipality}</strong> — ${a.region_name}</td>
-                    <td>${a.triggered_rule}</td>
-                    <td>${a.channel}</td>
-                    <td><span class="badge sev-media">${a.status}</span> <span style="font-size:0.75rem; color:var(--text-muted);">(${a.dedup_key})</span></td>
-                </tr>
-            `).join('');
+            data.alerts.forEach(alert => {
+                const tr = document.createElement("tr");
+                tr.innerHTML = `
+                    <td>${alert.triggered_at}</td>
+                    <td><strong>${alert.region_name}</strong></td>
+                    <td>${alert.rule_triggered}</td>
+                    <td><span class="badge badge-info">${alert.channel}</span></td>
+                    <td><span class="badge badge-dedup">${alert.status}</span></td>
+                `;
+                tbody.appendChild(tr);
+            });
+
+            if (pageInfo) {
+                pageInfo.textContent = `Página ${data.current_page} de ${data.pages} (${data.total} alertas no total)`;
+            }
+
+            if (btnPrev) btnPrev.disabled = !data.has_prev;
+            if (btnNext) btnNext.disabled = !data.has_next;
+        }
+
+        // Aliases para compatibilidade com rotinas de atualização periódica
+        function updateAlertsPanel(alerts) {
+            fetchAlertsPage(currentAlertsPage || 1);
+        }
+
+        function loadAlerts() {
+            fetchAlertsPage(1);
         }
 
         async function loadOccurrences() {
@@ -1046,17 +1862,178 @@
             );
         }
 
-        function onRegionChanged(regionId) {
-            loadRegionWeather(regionId);
-            loadRegionRisk(regionId);
+        // Módulo 07 - Inteligência Climática e Histórico Mensal
+        let chartAnnualNormalsInstance = null;
+        let chartMonthlySeriesInstance = null;
+        const MONTH_NAMES_SHORT = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
+
+        function initClimateFilters() {
+            const now = new Date();
+            const monthSel = document.getElementById('climateMonthSelect');
+            const yearSel = document.getElementById('climateYearSelect');
+            if (!monthSel || !yearSel) return;
+
+            monthSel.value = String(now.getMonth() + 1);
+
+            const currentYear = now.getFullYear();
+            let optionsHtml = `<option value="${currentYear}">${currentYear} (Ano Atual)</option>`;
+            optionsHtml += `<option value="0">🔮 Projeção / Normal Climatológica</option>`;
+            for (let y = currentYear - 1; y >= 2000; y--) {
+                optionsHtml += `<option value="${y}">${y}</option>`;
+            }
+            yearSel.innerHTML = optionsHtml;
+            yearSel.value = String(currentYear);
         }
 
-        document.addEventListener('DOMContentLoaded', () => {
+        function onClimateFilterChange() {
+            const regionId = document.getElementById('regionSelect').value;
+            if (regionId) {
+                loadClimateHistory(regionId);
+            }
+        }
+
+        async function loadClimateHistory(regionId) {
+            const monthSel = document.getElementById('climateMonthSelect');
+            const yearSel = document.getElementById('climateYearSelect');
+            if (!monthSel || !yearSel) return;
+
+            const month = monthSel.value;
+            const year = yearSel.value;
+
+            const res = await fetch(`/api/climate-history/${regionId}?month=${month}&year=${year}`);
+            const data = await res.json();
+
+            document.getElementById('climateOutlookBanner').innerHTML = `
+                <strong>📊 Diagnóstico Climatológico — ${data.municipality} (${data.region_name}):</strong> ${data.outlook_text}
+            `;
+
+            const norm = data.month_normal;
+            const rec = data.selected_record;
+            const ext = data.extremes || {};
+
+            document.getElementById('climNormRain').textContent = norm ? `${norm.total_rain_mm} mm` : '-- mm';
+            document.getElementById('climNormDays').textContent = norm ? `Média de ~${norm.rainy_days} dias chuvosos` : '--';
+
+            if (rec) {
+                document.getElementById('climRecRain').textContent = `${rec.total_rain_mm} mm`;
+                const anom = data.rain_anomaly_pct;
+                const anomColor = anom > 20 ? '#f87171' : (anom < -20 ? '#facc15' : '#4ade80');
+                document.getElementById('climAnomalyRain').innerHTML = `Desvio: <strong style="color:${anomColor}">${anom > 0 ? '+' : ''}${anom}%</strong> (${rec.rainy_days} dias chuva)`;
+            } else {
+                document.getElementById('climRecRain').textContent = norm ? `~${norm.total_rain_mm} mm (Esperado)` : '--';
+                document.getElementById('climAnomalyRain').textContent = 'Modo Projeção Sazonal ativo';
+            }
+
+            document.getElementById('climNormTemp').textContent = norm ? `${norm.avg_temp_c} °C` : '-- °C';
+            document.getElementById('climNormTempRange').textContent = norm
+                ? `Mín abs: ${norm.min_temp_c}°C / Máx abs: ${norm.max_temp_c}°C`
+                : '--';
+
+            if (ext.wettest) {
+                document.getElementById('climWettestYear').textContent = `Recorde: ${ext.wettest.year} (${ext.wettest.total_rain_mm} mm)`;
+                document.getElementById('climExtremesDetail').textContent = ext.driest
+                    ? `Mais seco: ${ext.driest.year} (${ext.driest.total_rain_mm} mm)`
+                    : '--';
+            }
+
+            // 1. Gráfico da Normal Climatológica Anual (Jan-Dez)
+            const normals = data.normals_annual || [];
+            const ctxAnnual = document.getElementById('chartAnnualNormals').getContext('2d');
+            if (chartAnnualNormalsInstance) chartAnnualNormalsInstance.destroy();
+            chartAnnualNormalsInstance = new Chart(ctxAnnual, {
+                type: 'bar',
+                data: {
+                    labels: normals.map(n => MONTH_NAMES_SHORT[n.month - 1]),
+                    datasets: [
+                        {
+                            type: 'line',
+                            label: 'Temp. Média (°C)',
+                            data: normals.map(n => n.avg_temp_c),
+                            borderColor: '#fb923c',
+                            backgroundColor: '#fb923c',
+                            yAxisID: 'yTemp',
+                            tension: 0.35
+                        },
+                        {
+                            type: 'bar',
+                            label: 'Chuva Média (mm)',
+                            data: normals.map(n => n.total_rain_mm),
+                            backgroundColor: normals.map(n => n.month === data.selected_month ? 'rgba(56, 189, 248, 0.85)' : 'rgba(56, 189, 248, 0.32)'),
+                            borderRadius: 4,
+                            yAxisID: 'yRain'
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { labels: { color: '#cbd5e1', boxWidth: 12 } } },
+                    scales: {
+                        x: { ticks: { color: '#94a3b8' }, grid: { display: false } },
+                        yRain: { type: 'linear', position: 'left', ticks: { color: '#38bdf8' }, grid: { color: 'rgba(255,255,255,0.05)' } },
+                        yTemp: { type: 'linear', position: 'right', ticks: { color: '#fb923c' }, grid: { display: false } }
+                    }
+                }
+            });
+
+            // 2. Gráfico da Série Histórica de 2000 a 2026 para o mês selecionado
+            const series = data.yearly_series_for_month || [];
+            const ctxSeries = document.getElementById('chartMonthlySeries').getContext('2d');
+            if (chartMonthlySeriesInstance) chartMonthlySeriesInstance.destroy();
+            chartMonthlySeriesInstance = new Chart(ctxSeries, {
+                type: 'bar',
+                data: {
+                    labels: series.map(s => s.year),
+                    datasets: [
+                        {
+                            type: 'line',
+                            label: 'Temp. Média (°C)',
+                            data: series.map(s => s.avg_temp_c),
+                            borderColor: '#facc15',
+                            yAxisID: 'yTemp2',
+                            tension: 0.3
+                        },
+                        {
+                            type: 'bar',
+                            label: 'Chuva no Mês (mm)',
+                            data: series.map(s => s.total_rain_mm),
+                            backgroundColor: series.map(s => s.year === data.selected_year ? 'rgba(34, 197, 94, 0.85)' : 'rgba(96, 165, 250, 0.45)'),
+                            borderRadius: 3,
+                            yAxisID: 'yRain2'
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { labels: { color: '#cbd5e1', boxWidth: 12 } } },
+                    scales: {
+                        x: { ticks: { color: '#94a3b8', maxRotation: 45 }, grid: { display: false } },
+                        yRain2: { type: 'linear', position: 'left', ticks: { color: '#60a5fa' }, grid: { color: 'rgba(255,255,255,0.05)' } },
+                        yTemp2: { type: 'linear', position: 'right', ticks: { color: '#facc15' }, grid: { display: false } }
+                    }
+                }
+            });
+        }
+
+        const loadWeatherForRegion = loadRegionWeather;
+        const loadRiskForRegion = loadRegionRisk;
+
+        async function onRegionChanged(regionId) {
+            await Promise.all([
+                loadRegionWeather(regionId),
+                loadRegionRisk(regionId),
+                loadClimateHistory(regionId) // <-- Atualiza o histórico mensal junto com a cidade!
+            ]);
+        }
+
+        document.addEventListener('DOMContentLoaded', async () => {
             initMap();
+            initClimateFilters();
             loadMapSummary();
             loadOccurrences();
             loadTrafficPanel();
-            loadAlerts();
+            fetchAlertsPage(1);
 
             // Inicia com a detecção inteligente (Memória -> IP -> Fallback)
             autoDetectRegionOnLoad();

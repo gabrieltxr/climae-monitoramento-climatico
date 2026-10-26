@@ -150,3 +150,7 @@ def evaluate_alerts_all_regions() -> int:
     for r in regions:
         total += len(evaluate_region_alerts(r))
     return total
+
+# Aliases oficiais do serviço de alertas periódicos
+evaluate_and_record_alerts = evaluate_alerts_all_regions
+run_alert_engine = evaluate_alerts_all_regions

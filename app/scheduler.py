@@ -3,10 +3,40 @@ import os
 from datetime import datetime, timedelta, timezone
 from apscheduler.schedulers.background import BackgroundScheduler
 from app.collectors.open_meteo import collect_all_regions
+from app.collectors.traffic_collector import update_highway_conditions
+from app.services.alert_engine import run_alert_engine, evaluate_and_record_alerts
 from app.models import WeatherObservation
 
 logger = logging.getLogger(__name__)
 scheduler = BackgroundScheduler()
+
+
+def run_scheduled_cycle(app):
+    """
+    Executa o ciclo periódico completo:
+    1. Coleta meteorológica Open-Meteo
+    2. Avaliação de risco e geração de alertas
+    3. Atualização de telemetria dos corredores de tráfego
+    """
+    with app.app_context():
+        try:
+            print("[SCHEDULER] 1. Executando coleta meteorológica das 56 regiões...")
+            logger.info("[SCHEDULER] 1. Executando coleta meteorológica das 56 regiões...")
+            collect_all_regions()
+
+            print("[SCHEDULER] 2. Avaliando índices de risco e gerando alertas...")
+            logger.info("[SCHEDULER] 2. Avaliando índices de risco e gerando alertas...")
+            run_alert_engine()
+
+            print("[SCHEDULER] 3. Atualizando telemetria dos 7 corredores de tráfego...")
+            logger.info("[SCHEDULER] 3. Atualizando telemetria dos 7 corredores de tráfego...")
+            update_highway_conditions()
+
+            print("[SCHEDULER] Ciclo concluído com sucesso!")
+            logger.info("[SCHEDULER] Ciclo concluído com sucesso!")
+        except Exception as e:
+            print(f"[SCHEDULER ERROR] Falha no ciclo agendado: {e}")
+            logger.error("[SCHEDULER ERROR] Falha no ciclo agendado: %s", e)
 
 
 def init_scheduler(app):
@@ -14,21 +44,14 @@ def init_scheduler(app):
     Inicia o agendador em segundo plano a cada 15 minutos (padrão)
     e avalia alertas automaticamente após cada coleta.
     """
+    if app.config.get("TESTING"):
+        return
+
     if os.environ.get("WERKZEUG_RUN_MAIN") == "true" or not app.debug:
         interval_minutes = int(os.getenv("COLLECT_INTERVAL_MINUTES", "15"))
 
         def scheduled_job():
-            with app.app_context():
-                logger.info("Iniciando ciclo automático de 15 min (Open-Meteo + Rodovias + Alertas)...")
-                result = collect_all_regions()
-                try:
-                    from app.collectors.institutional_traffic import update_institutional_traffic
-                    from app.services.alert_engine import evaluate_alerts_all_regions
-                    update_institutional_traffic()
-                    evaluate_alerts_all_regions()
-                except Exception as exc:
-                    logger.error("Erro ao processar trânsito/alertas: %s", exc)
-                logger.info("Ciclo automático concluído: %s", result)
+            run_scheduled_cycle(app)
 
         # Verifica ao ligar o servidor se os dados têm mais de 15 min; se sim, atualiza
         with app.app_context():

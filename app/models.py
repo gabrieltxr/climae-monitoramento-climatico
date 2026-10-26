@@ -8,15 +8,30 @@ class Region(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(100), nullable=False)          # Ex: "Centro", "Cassino", "Zona Rural"
     municipality = db.Column(db.String(100), nullable=False)  # Ex: "Pelotas", "Rio Grande"
+    city = db.synonym('municipality')
     latitude = db.Column(db.Float, nullable=False)
     longitude = db.Column(db.Float, nullable=False)
     geometry = db.Column(db.Text, nullable=True)              # GeoJSON ou WKT (para uso futuro com PostGIS)
+
+    def __init__(self, **kwargs):
+        if "city" in kwargs and "municipality" not in kwargs:
+            kwargs["municipality"] = kwargs.pop("city")
+        super().__init__(**kwargs)
+
+    @property
+    def city(self):
+        return self.municipality
+
+    @city.setter
+    def city(self, value):
+        self.municipality = value
 
     def to_dict(self):
         return {
             "id": self.id,
             "name": self.name,
             "municipality": self.municipality,
+            "city": self.municipality,
             "latitude": self.latitude,
             "longitude": self.longitude,
             "geometry": self.geometry,
@@ -34,6 +49,7 @@ class WeatherObservation(db.Model):
     precipitation_mm = db.Column(db.Float, nullable=True)
     rain_probability = db.Column(db.Float, nullable=True)
     wind_speed = db.Column(db.Float, nullable=True)
+    wind_direction = db.Column(db.Float, nullable=True)  # <-- NOVO (v0.2): Direção em graus (0-360)
     source = db.Column(db.String(50), nullable=False)                   # Ex: "Open-Meteo"
 
 class Occurrence(db.Model):
@@ -50,12 +66,29 @@ class Occurrence(db.Model):
 class TrafficEvent(db.Model):
     __tablename__ = 'traffic_events'
     id = db.Column(db.Integer, primary_key=True)
-    region_id = db.Column(db.Integer, db.ForeignKey('regions.id'), nullable=False)
-    event_type = db.Column(db.String(50), nullable=False)               # Ex: "Interdição", "Lentidão"
-    status = db.Column(db.String(30), nullable=False)                   # Ex: "Ativo", "Desatualizado"
-    occurred_at = db.Column(db.DateTime(timezone=True), nullable=False)
-    source = db.Column(db.String(50), nullable=False)
+    highway = db.Column(db.String(120), nullable=True, index=True)      # Ex: "BR-116", "BR-392"
+    status = db.Column(db.String(50), nullable=False)                   # Normal, Atenção, Alerta, etc.
+    description = db.Column(db.Text, nullable=True)                     # Detalhamento da pista / tráfego
+    source = db.Column(db.String(100), nullable=False)                  # Ex: "PRF / Ecosul + Telemetria CLIMAE"
+    reported_at = db.Column(db.DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+    # Campos de compatibilidade para consultas legadas
+    region_id = db.Column(db.Integer, db.ForeignKey('regions.id'), nullable=True)
+    event_type = db.Column(db.String(100), nullable=True)
+    occurred_at = db.Column(db.DateTime(timezone=True), nullable=True)
     source_updated_at = db.Column(db.DateTime(timezone=True), nullable=True)
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "highway": self.highway,
+            "status": self.status,
+            "description": self.description,
+            "source": self.source,
+            "reported_at": self.reported_at.isoformat() if self.reported_at else None,
+            "region_id": self.region_id,
+            "event_type": self.event_type or self.highway,
+        }
 
 class RiskAssessment(db.Model):
     __tablename__ = 'risk_assessments'
@@ -76,3 +109,44 @@ class Alert(db.Model):
     channel = db.Column(db.String(30), nullable=False)                  # Ex: "email", "dashboard"
     status = db.Column(db.String(30), nullable=False)                   # Ex: "enviado", "pendente", "erro"
     dedup_key = db.Column(db.String(120), unique=True, nullable=False)  # Evita alertas duplicados
+
+    region = db.relationship('Region', backref='alerts', lazy=True)
+
+    @property
+    def timestamp(self):
+        return self.created_at
+
+    @property
+    def rule_triggered(self):
+        return self.triggered_rule
+
+
+class MonthlyClimateSummary(db.Model):
+    """
+    Armazena estatísticas mensais consolidadas (2000 até o presente) e Normais Climatológicas.
+    - Quando year > 0 (ex: 2024, month=5): representa o histórico real consolidado daquele mês/ano.
+    - Quando year == 0 (month=1..12): representa a Média Histórica (Normal Climatológica) daquele mês.
+    """
+    __tablename__ = 'monthly_climate_summaries'
+
+    id = db.Column(db.Integer, primary_key=True)
+    region_id = db.Column(db.Integer, db.ForeignKey('regions.id'), nullable=False, index=True)
+    year = db.Column(db.Integer, nullable=False, index=True)   # 0 = Média Histórica (Climatologia) | 2000..2026 = Ano específico
+    month = db.Column(db.Integer, nullable=False, index=True)  # 1 (Janeiro) a 12 (Dezembro)
+
+    avg_temp_c = db.Column(db.Float, nullable=True)            # Temperatura média do mês (°C)
+    max_temp_c = db.Column(db.Float, nullable=True)            # Temperatura máxima registrada/média (°C)
+    min_temp_c = db.Column(db.Float, nullable=True)            # Temperatura mínima registrada/média (°C)
+    total_rain_mm = db.Column(db.Float, nullable=True)         # Chuva acumulada no mês (mm)
+    rainy_days = db.Column(db.Integer, nullable=True)          # Dias com precipitação >= 1.0 mm
+    max_wind_kmh = db.Column(db.Float, nullable=True)          # Pico de vento no mês (km/h)
+    source = db.Column(db.String(80), default='Open-Meteo ERA5 Reanalysis')
+    updated_at = db.Column(
+        db.DateTime,
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False
+    )
+
+    __table_args__ = (
+        db.UniqueConstraint('region_id', 'year', 'month', name='uq_region_year_month'),
+    )
