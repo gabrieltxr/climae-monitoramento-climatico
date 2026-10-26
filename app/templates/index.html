@@ -1404,9 +1404,6 @@
                 const res = await fetch('/api/weather-summary');
                 const data = await res.json();
                 lastMapSummaryData = Array.isArray(data) ? data : (data.summary || data.regions || []);
-                if (data && data.alerts && typeof updateAlertsPanel === 'function') {
-                    updateAlertsPanel(data.alerts);
-                }
                 renderMapByActiveLayer();
             } catch (err) {
                 console.error("Erro ao carregar resumo do mapa:", err);

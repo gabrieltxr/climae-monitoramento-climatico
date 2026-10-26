@@ -306,3 +306,30 @@ def get_traffic_panel_data() -> list[dict]:
         }
         for ev in corridor_events
     ]
+
+
+def get_corridors_for_municipality(municipality: str) -> list[dict]:
+    """Retorna os metadados dos corredores rodoviários que cruzam determinado município."""
+    if not municipality:
+        return []
+    m_clean = municipality.strip().lower()
+    return [
+        c for c in HIGHWAY_CORRIDORS
+        if any(m_clean == m.strip().lower() for m in c.get("municipalities", []))
+    ]
+
+
+def get_active_traffic_events_for_municipality(municipality: str) -> list[TrafficEvent]:
+    """
+    Retorna os eventos rodoviários com condições adversas ativas (Atenção, Alerta ou Risco Crítico)
+    para os corredores que cortam o município informado.
+    """
+    corridors = get_corridors_for_municipality(municipality)
+    if not corridors:
+        return []
+
+    highway_names = [c["highway"] for c in corridors]
+    events = TrafficEvent.query.filter(TrafficEvent.highway.in_(highway_names)).all()
+
+    normal_labels = {"Fluxo Normal", "Operação Normal"}
+    return [ev for ev in events if ev.status and ev.status not in normal_labels]

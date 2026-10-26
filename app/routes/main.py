@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from flask import Blueprint, render_template, jsonify, request
 from app.models import db, Region, WeatherObservation, Occurrence, RiskAssessment, Alert, TrafficEvent, MonthlyClimateSummary
 from app.services.risk_engine import calculate_region_risk
@@ -23,6 +23,16 @@ def to_utc_iso(dt):
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)
     return dt.isoformat()
+
+BRT_TZ = timezone(timedelta(hours=-3))
+
+def to_brt_str(dt):
+    """Converte datetime UTC para string formatada no Horário de Brasília (BRT, UTC-3)."""
+    if not dt:
+        return "--"
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(BRT_TZ).strftime("%d/%m/%Y %H:%M")
 
 @main_bp.route('/api/weather/<int:region_id>')
 def api_region_weather(region_id):
@@ -147,39 +157,14 @@ def get_weather_summary():
             ),
         })
 
-    # 2. Faça apenas a consulta dos alertas existentes:
-    alerts_query = Alert.query.order_by(Alert.id.desc()).all()
-
-    alerts_list = []
-    for a in alerts_query:
-        # Garante compatibilidade caso o campo seja triggered_at ou created_at
-        dt = getattr(a, "triggered_at", getattr(a, "created_at", None))
-        dt_str = dt.strftime("%d/%m/%Y %H:%M") if dt else "--"
-
-        reg_name = a.region.name if getattr(a, "region", None) else f"Região #{a.region_id}"
-
-        alerts_list.append({
-            "id": a.id,
-            "triggered_at": dt_str,
-            "region_name": reg_name,
-            "city": a.region.city if getattr(a, "region", None) else "",
-            "timestamp": to_utc_iso(a.timestamp) if hasattr(a, 'timestamp') and a.timestamp else None,
-            "created_at": to_utc_iso(a.created_at) if hasattr(a, 'created_at') and a.created_at else None,
-            "rule_triggered": getattr(a, "rule_triggered", getattr(a, "message", "--")),
-            "channel": getattr(a, "channel", "PAINEL"),
-            "status": getattr(a, "status", "SENT"),
-            "dedup_key": getattr(a, "dedup_key", "")
-        })
-
     if request.args.get('format') == 'list':
         return jsonify(summary)
 
-    # Retorne normalmente os dados com os alertas
+    # Retorna estritamente o resumo meteorológico e as regiões para o mapa
     return jsonify({
         "success": True,
         "summary": summary,
         "regions": summary,
-        "alerts": alerts_list,
     })
 
 
@@ -283,9 +268,9 @@ def get_alerts():
 
     alerts_list = []
     for a in pagination.items:
-        # Suporte a triggered_at ou created_at
+        # Suporte a triggered_at ou created_at formatado no Horário de Brasília (BRT, UTC-3)
         dt = getattr(a, "triggered_at", getattr(a, "created_at", None))
-        dt_str = dt.strftime("%d/%m/%Y %H:%M") if dt else "--"
+        dt_str = to_brt_str(dt)
         reg_name = a.region.name if getattr(a, "region", None) else f"Região #{a.region_id}"
 
         alerts_list.append({

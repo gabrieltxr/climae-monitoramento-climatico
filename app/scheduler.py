@@ -5,6 +5,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from app.collectors.open_meteo import collect_all_regions
 from app.collectors.traffic_collector import update_highway_conditions
 from app.services.alert_engine import run_alert_engine, evaluate_and_record_alerts
+from app.services.pruning_service import prune_expired_data
 from app.models import WeatherObservation
 
 logger = logging.getLogger(__name__)
@@ -13,10 +14,10 @@ scheduler = BackgroundScheduler()
 
 def run_scheduled_cycle(app):
     """
-    Executa o ciclo periódico completo:
+    Executa o ciclo periódico completo na ordem lógica:
     1. Coleta meteorológica Open-Meteo
-    2. Avaliação de risco e geração de alertas
-    3. Atualização de telemetria dos corredores de tráfego
+    2. Atualização de telemetria dos corredores de tráfego
+    3. Avaliação de risco e geração de alertas (incorporando clima + rodovias)
     """
     with app.app_context():
         try:
@@ -24,13 +25,13 @@ def run_scheduled_cycle(app):
             logger.info("[SCHEDULER] 1. Executando coleta meteorológica das 56 regiões...")
             collect_all_regions()
 
-            print("[SCHEDULER] 2. Avaliando índices de risco e gerando alertas...")
-            logger.info("[SCHEDULER] 2. Avaliando índices de risco e gerando alertas...")
-            run_alert_engine()
-
-            print("[SCHEDULER] 3. Atualizando telemetria dos 7 corredores de tráfego...")
-            logger.info("[SCHEDULER] 3. Atualizando telemetria dos 7 corredores de tráfego...")
+            print("[SCHEDULER] 2. Atualizando telemetria dos 7 corredores de tráfego...")
+            logger.info("[SCHEDULER] 2. Atualizando telemetria dos 7 corredores de tráfego...")
             update_highway_conditions()
+
+            print("[SCHEDULER] 3. Avaliando índices de risco e gerando alertas...")
+            logger.info("[SCHEDULER] 3. Avaliando índices de risco e gerando alertas...")
+            run_alert_engine()
 
             print("[SCHEDULER] Ciclo concluído com sucesso!")
             logger.info("[SCHEDULER] Ciclo concluído com sucesso!")
@@ -44,7 +45,10 @@ def init_scheduler(app):
     Inicia o agendador em segundo plano a cada 15 minutos (padrão)
     e avalia alertas automaticamente após cada coleta.
     """
-    if app.config.get("TESTING"):
+    if app.config.get("TESTING") or app.config.get("DISABLE_SCHEDULER"):
+        return
+
+    if scheduler.running:
         return
 
     if os.environ.get("WERKZEUG_RUN_MAIN") == "true" or not app.debug:
@@ -52,6 +56,11 @@ def init_scheduler(app):
 
         def scheduled_job():
             run_scheduled_cycle(app)
+
+        def pruning_job():
+            with app.app_context():
+                logger.info("Executando rotina diária de purga de dados expirados...")
+                prune_expired_data()
 
         # Verifica ao ligar o servidor se os dados têm mais de 15 min; se sim, atualiza
         with app.app_context():
@@ -87,5 +96,12 @@ def init_scheduler(app):
                 id="open_meteo_collector",
                 replace_existing=True,
             )
+            scheduler.add_job(
+                func=pruning_job,
+                trigger="interval",
+                hours=24,
+                id="database_pruning_job",
+                replace_existing=True,
+            )
             scheduler.start()
-            logger.info("APScheduler iniciado (ciclo: %d min).", interval_minutes)
+            logger.info("APScheduler iniciado (ciclo coleta: %d min | purga: 24h).", interval_minutes)

@@ -52,6 +52,11 @@ class WeatherObservation(db.Model):
     wind_direction = db.Column(db.Float, nullable=True)  # <-- NOVO (v0.2): Direção em graus (0-360)
     source = db.Column(db.String(50), nullable=False)                   # Ex: "Open-Meteo"
 
+    __table_args__ = (
+        db.Index('ix_weather_obs_lookup', 'region_id', 'is_forecast', 'observed_at'),
+        db.Index('ix_weather_obs_collected_at', 'collected_at'),
+    )
+
 class Occurrence(db.Model):
     __tablename__ = 'occurrences'
     id = db.Column(db.Integer, primary_key=True)
@@ -62,6 +67,10 @@ class Occurrence(db.Model):
     description = db.Column(db.Text, nullable=True)
     source = db.Column(db.String(100), nullable=False)                  # Ex: "Defesa Civil", "S2iD"
     reliability = db.Column(db.String(30), default='confirmado')
+
+    __table_args__ = (
+        db.Index('ix_occurrences_region_occurred', 'region_id', 'occurred_at'),
+    )
 
 class TrafficEvent(db.Model):
     __tablename__ = 'traffic_events'
@@ -100,6 +109,10 @@ class RiskAssessment(db.Model):
     factors = db.Column(db.JSON, nullable=True)                         # Pesos e justificativas em JSON
     method_version = db.Column(db.String(20), nullable=False)           # Ex: "v0.1-mvp"
 
+    __table_args__ = (
+        db.Index('ix_risk_assessments_region_assessed', 'region_id', 'assessed_at'),
+    )
+
 class Alert(db.Model):
     __tablename__ = 'alerts'
     id = db.Column(db.Integer, primary_key=True)
@@ -111,6 +124,10 @@ class Alert(db.Model):
     dedup_key = db.Column(db.String(120), unique=True, nullable=False)  # Evita alertas duplicados
 
     region = db.relationship('Region', backref='alerts', lazy=True)
+
+    __table_args__ = (
+        db.Index('ix_alerts_region_created', 'region_id', 'created_at'),
+    )
 
     @property
     def timestamp(self):

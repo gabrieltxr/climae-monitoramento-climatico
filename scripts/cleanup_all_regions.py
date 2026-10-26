@@ -6,11 +6,10 @@ import sys
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from app import create_app, db
+from app.config import Config
 from app.models import Region, WeatherObservation, MonthlyClimateSummary
 
-class CleanupConfig:
-    SQLALCHEMY_DATABASE_URI = 'sqlite:///clima_zonasul.db'
-    SQLALCHEMY_TRACK_MODIFICATIONS = False
+class CleanupConfig(Config):
     TESTING = True
 
 app = create_app(CleanupConfig)
