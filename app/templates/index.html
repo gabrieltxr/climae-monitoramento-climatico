@@ -281,6 +281,166 @@
             font-size: 0.75rem;
             color: #7dd3fc;
             opacity: 0.9;
+            display: inline-flex;
+            align-items: center;
+        }
+
+        .badge-gps-high {
+            background: rgba(16, 185, 129, 0.15);
+            border: 1px solid rgba(16, 185, 129, 0.4);
+            color: #6ee7b7;
+            padding: 0.25rem 0.55rem;
+            border-radius: 8px;
+            font-size: 0.75rem;
+            font-weight: 500;
+            transition: all 0.2s;
+        }
+        .badge-gps-high:hover {
+            background: rgba(16, 185, 129, 0.25);
+            box-shadow: 0 0 10px rgba(16, 185, 129, 0.3);
+        }
+        .badge-gps-med {
+            background: rgba(245, 158, 11, 0.15);
+            border: 1px solid rgba(245, 158, 11, 0.4);
+            color: #fcd34d;
+            padding: 0.25rem 0.55rem;
+            border-radius: 8px;
+            font-size: 0.75rem;
+            font-weight: 500;
+            transition: all 0.2s;
+        }
+        .badge-gps-med:hover {
+            background: rgba(245, 158, 11, 0.25);
+            box-shadow: 0 0 10px rgba(245, 158, 11, 0.3);
+        }
+        .badge-gps-low {
+            background: rgba(239, 68, 68, 0.15);
+            border: 1px solid rgba(239, 68, 68, 0.4);
+            color: #fca5a5;
+            padding: 0.25rem 0.55rem;
+            border-radius: 8px;
+            font-size: 0.75rem;
+            font-weight: 500;
+            transition: all 0.2s;
+        }
+        .badge-gps-low:hover {
+            background: rgba(239, 68, 68, 0.25);
+            box-shadow: 0 0 10px rgba(239, 68, 68, 0.3);
+        }
+
+        /* Modal de Diagnostico de Precisao GPS / IP */
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            background: rgba(15, 23, 42, 0.78);
+            backdrop-filter: blur(6px);
+            z-index: 99999;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 1.5rem;
+        }
+        .modal-container {
+            background: #1e293b;
+            border: 1px solid rgba(56, 189, 248, 0.35);
+            border-radius: 16px;
+            max-width: 580px;
+            width: 100%;
+            box-shadow: 0 20px 45px rgba(0, 0, 0, 0.6);
+            overflow: hidden;
+            animation: fadeInModal 0.2s ease-out;
+        }
+        @keyframes fadeInModal {
+            from { opacity: 0; transform: scale(0.96); }
+            to { opacity: 1; transform: scale(1); }
+        }
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 1rem 1.4rem;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+            background: rgba(15, 23, 42, 0.5);
+        }
+        .modal-header h3 {
+            font-size: 1.05rem;
+            font-weight: 600;
+            color: #f1f5f9;
+            margin: 0;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        .modal-close-btn {
+            background: transparent;
+            border: none;
+            color: #94a3b8;
+            font-size: 1.25rem;
+            cursor: pointer;
+            padding: 0.25rem 0.5rem;
+            border-radius: 6px;
+            transition: all 0.2s;
+        }
+        .modal-close-btn:hover {
+            color: #f1f5f9;
+            background: rgba(255, 255, 255, 0.08);
+        }
+        .modal-body {
+            padding: 1.2rem 1.4rem;
+            display: flex;
+            flex-direction: column;
+            gap: 0.75rem;
+        }
+        .diag-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 0.45rem 0;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+            font-size: 0.88rem;
+        }
+        .diag-label {
+            color: #94a3b8;
+        }
+        .diag-val {
+            color: #f8fafc;
+            font-weight: 500;
+            font-family: 'JetBrains Mono', 'Fira Code', monospace;
+            font-size: 0.85rem;
+        }
+        .diag-tips {
+            margin-top: 0.5rem;
+            background: rgba(15, 23, 42, 0.5);
+            border-radius: 8px;
+            padding: 0.9rem;
+            border: 1px solid rgba(255, 255, 255, 0.05);
+        }
+        .diag-tips h4 {
+            margin: 0 0 0.5rem 0;
+            font-size: 0.85rem;
+            color: #38bdf8;
+            font-weight: 600;
+        }
+        .diag-tips ul {
+            margin: 0;
+            padding-left: 1.2rem;
+            font-size: 0.8rem;
+            color: #cbd5e1;
+            line-height: 1.45;
+        }
+        .diag-tips li {
+            margin-bottom: 0.4rem;
+        }
+        .modal-footer {
+            display: flex;
+            justify-content: flex-end;
+            gap: 0.75rem;
+            padding: 0.9rem 1.4rem;
+            border-top: 1px solid rgba(255, 255, 255, 0.08);
+            background: rgba(15, 23, 42, 0.5);
         }
 
         .grid-top {
@@ -576,7 +736,7 @@
             display: flex;
             align-items: center;
             justify-content: center;
-            box-shadow: 0 0 12px rgba(56, 189, 248, 0.45);
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5), 0 0 6px rgba(56, 189, 248, 0.2);
         }
         .wind-label-pill {
             margin-top: 2px;
@@ -589,18 +749,296 @@
             border-radius: 999px;
             white-space: nowrap;
         }
-        .thermal-badge-marker {
-            background: rgba(15, 23, 42, 0.82);
-            border: 1px solid rgba(255, 255, 255, 0.3);
-            color: #fff;
-            padding: 2px 7px;
+
+        /* Macrovetor Regional de Vento (Abordagem 1 - Agrupamento Despoluído) */
+        .wind-macro-marker {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            pointer-events: auto;
+            cursor: pointer;
+            transition: transform 0.25s ease;
+        }
+        .wind-macro-marker:hover {
+            transform: scale(1.1);
+            z-index: 1000 !important;
+        }
+        .wind-macro-circle {
+            width: 48px;
+            height: 48px;
+            border-radius: 50%;
+            background: rgba(15, 23, 42, 0.92);
+            border: 2.5px solid #38bdf8;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.5), 0 0 8px rgba(56, 189, 248, 0.2), inset 0 0 8px rgba(15, 23, 42, 0.8);
+            position: relative;
+        }
+        .wind-macro-arrow {
+            filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.6));
+            transition: transform 0.4s ease-out;
+        }
+        .wind-macro-pill {
+            margin-top: 4px;
+            background: rgba(15, 23, 42, 0.95);
+            border: 1px solid rgba(56, 189, 248, 0.4);
+            color: #f8fafc;
+            padding: 3px 8px;
             border-radius: 999px;
-            font-size: 0.75rem;
+            font-size: 0.72rem;
             font-weight: 700;
             white-space: nowrap;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.5);
-            text-align: center;
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.5);
+            display: flex;
+            align-items: center;
+            gap: 4px;
         }
+        .wind-macro-city {
+            color: #38bdf8;
+            text-transform: uppercase;
+            font-size: 0.65rem;
+            letter-spacing: 0.05em;
+        }
+        .wind-macro-speed-badge {
+            margin-top: 3px;
+            background: rgba(15, 23, 42, 0.92);
+            border: 1px solid rgba(56, 189, 248, 0.4);
+            color: #f8fafc;
+            padding: 1px 7px;
+            border-radius: 999px;
+            font-size: 0.66rem;
+            font-weight: 700;
+            white-space: nowrap;
+            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.55);
+            letter-spacing: 0.02em;
+        }
+        .risk-macro-compact {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 4px;
+            background: rgba(15, 23, 42, 0.94);
+            border: 1.5px solid #38bdf8;
+            padding: 2px 8px;
+            border-radius: 999px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.6);
+            cursor: pointer;
+            pointer-events: auto;
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+            white-space: nowrap;
+        }
+        .risk-macro-compact:hover {
+            transform: scale(1.18);
+            z-index: 1000 !important;
+        }
+        .thermal-macro-compact {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            background: rgba(15, 23, 42, 0.94);
+            border: 1.5px solid rgba(56, 189, 248, 0.55);
+            padding: 2px 8px;
+            border-radius: 999px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.6);
+            cursor: pointer;
+            pointer-events: auto;
+            transition: transform 0.2s ease, border-color 0.2s ease;
+            white-space: nowrap;
+        }
+        .thermal-macro-compact:hover {
+            transform: scale(1.18);
+            border-color: #38bdf8;
+            z-index: 1000 !important;
+        }
+        .thermal-badge-marker {
+            background: rgba(15, 23, 42, 0.88);
+            border: 1px solid rgba(56, 189, 248, 0.4);
+            color: #fff;
+            padding: 2px 8px;
+            border-radius: 999px;
+            font-size: 0.72rem;
+            font-weight: 700;
+            white-space: nowrap;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.6);
+            text-align: center;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+        }
+
+        /* Macro-Badge Térmico Regional (Massa de Ar Agrupada por Município) */
+        .thermal-macro-marker {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            background: rgba(15, 23, 42, 0.94);
+            border: 2px solid rgba(56, 189, 248, 0.55);
+            padding: 4px 12px;
+            border-radius: 999px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5), 0 0 6px rgba(56, 189, 248, 0.2);
+            cursor: pointer;
+            pointer-events: auto;
+            transition: transform 0.25s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+            white-space: nowrap;
+        }
+        .thermal-macro-marker:hover {
+            transform: scale(1.08);
+            border-color: #38bdf8;
+            box-shadow: 0 4px 14px rgba(0, 0, 0, 0.65), 0 0 10px rgba(56, 189, 248, 0.35);
+            z-index: 1000 !important;
+        }
+        .thermal-macro-city {
+            color: #bae6fd;
+            font-size: 0.68rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+        }
+        .thermal-macro-temp {
+            color: #fff;
+            font-size: 0.84rem;
+            font-weight: 800;
+            font-family: 'JetBrains Mono', 'Fira Code', monospace;
+        }
+        .thermal-macro-range {
+            color: #94a3b8;
+            font-size: 0.65rem;
+            font-weight: 500;
+        }
+        /* Macro-Badge de Risco Regional (Zoom < 11) */
+        .risk-macro-marker {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            background: rgba(15, 23, 42, 0.94);
+            border: 2px solid #38bdf8;
+            padding: 4px 12px;
+            border-radius: 999px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5), 0 0 6px rgba(56, 189, 248, 0.2);
+            cursor: pointer;
+            pointer-events: auto;
+            transition: transform 0.25s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+            white-space: nowrap;
+        }
+        .risk-macro-marker:hover {
+            transform: scale(1.08);
+            box-shadow: 0 6px 22px rgba(0, 0, 0, 0.75);
+            z-index: 1000 !important;
+        }
+        .risk-macro-dot {
+            width: 11px;
+            height: 11px;
+            border-radius: 50%;
+            display: inline-block;
+        }
+        .risk-macro-city {
+            color: #bae6fd;
+            font-size: 0.68rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+        }
+        .risk-macro-level {
+            font-size: 0.75rem;
+            font-weight: 800;
+        }
+
+        /* Marcadores Minimalistas Despoluídos para Bairros (Zoom >= 11) */
+        .wind-vector-compact {
+            width: 26px;
+            height: 26px;
+            border-radius: 50%;
+            background: rgba(15, 23, 42, 0.9);
+            border: 1.5px solid #38bdf8;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 0 8px rgba(56, 189, 248, 0.45);
+            transition: transform 0.2s ease, border-color 0.2s ease;
+            cursor: pointer;
+        }
+        .wind-vector-compact:hover {
+            transform: scale(1.3);
+            border-color: #fff;
+            box-shadow: 0 0 14px rgba(255, 255, 255, 0.6);
+        }
+
+        .thermal-dot-compact {
+            background: rgba(15, 23, 42, 0.9);
+            border: 1.5px solid rgba(56, 189, 248, 0.55);
+            color: #f8fafc;
+            padding: 2px 7px;
+            border-radius: 999px;
+            font-size: 0.68rem;
+            font-weight: 700;
+            white-space: nowrap;
+            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.55);
+            cursor: pointer;
+            transition: transform 0.2s ease, border-color 0.2s ease;
+        }
+        .thermal-dot-compact:hover {
+            transform: scale(1.25);
+            border-color: #fff;
+            box-shadow: 0 0 12px rgba(56, 189, 248, 0.7);
+        }
+
+        /* Destaque Ativo na Região Selecionada (Suave e Elegante) */
+        .selected-region-pill {
+            margin-top: 3px;
+            background: rgba(15, 23, 42, 0.94) !important;
+            border: 1.5px solid #38bdf8 !important;
+            color: #e0f2fe !important;
+            padding: 2px 8px !important;
+            border-radius: 999px !important;
+            font-size: 0.68rem !important;
+            font-weight: 700 !important;
+            white-space: nowrap !important;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.6), 0 0 6px rgba(56, 189, 248, 0.25) !important;
+            display: inline-block;
+        }
+
+        /* Rótulos Secundários Descobertos Progressivamente pelo Zoom */
+        .neighborhood-label-secondary {
+            margin-top: 2px;
+            background: rgba(15, 23, 42, 0.88);
+            border: 1px solid rgba(255, 255, 255, 0.16);
+            color: #cbd5e1;
+            padding: 1px 6px;
+            border-radius: 999px;
+            font-size: 0.64rem;
+            font-weight: 600;
+            white-space: nowrap;
+            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.5);
+            pointer-events: auto;
+            transition: all 0.2s ease;
+            display: inline-block;
+        }
+        .neighborhood-label-secondary:hover {
+            color: #fff;
+            border-color: #38bdf8;
+            background: rgba(15, 23, 42, 0.96);
+            transform: scale(1.05);
+        }
+
+        /* Tooltip Flutuante no Hover */
+        .leaflet-tooltip-climae {
+            background: rgba(15, 23, 42, 0.95) !important;
+            border: 1px solid rgba(56, 189, 248, 0.55) !important;
+            color: #f8fafc !important;
+            border-radius: 8px !important;
+            padding: 5px 10px !important;
+            font-size: 0.75rem !important;
+            font-family: 'Inter', sans-serif !important;
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.75) !important;
+            line-height: 1.4 !important;
+        }
+        .leaflet-tooltip-climae::before {
+            border-top-color: rgba(56, 189, 248, 0.55) !important;
+        }
+
         .map-legend-bar {
             display: flex;
             align-items: center;
@@ -752,13 +1190,27 @@
                 {% for municipality, regs in regions|groupby('municipality') %}
                 <optgroup label="📍 {{ municipality|upper }}">
                     {% for r in regs %}
-                    <option value="{{ r.id }}" data-lat="{{ r.latitude }}" data-lon="{{ r.longitude }}">
+                    <option value="{{ r.id }}" data-lat="{{ r.latitude }}" data-lon="{{ r.longitude }}" {% if preferred_id and preferred_id|string == r.id|string %}selected{% endif %}>
                         {{ r.name }}
                     </option>
                     {% endfor %}
                 </optgroup>
                 {% endfor %}
             </select>
+            <script>
+                // Execução imediata para evitar qualquer oscilação visual (flicker) no refresh
+                (function() {
+                    try {
+                        const savedId = localStorage.getItem('climae_preferred_region_id');
+                        if (savedId) {
+                            const sel = document.getElementById('regionSelect');
+                            if (sel && sel.querySelector('option[value="' + savedId + '"]')) {
+                                sel.value = savedId;
+                            }
+                        }
+                    } catch (e) {}
+                })();
+            </script>
 
             <button type="button" class="btn-locate" id="btnLocateMe" onclick="locateByBrowserGPS()" title="Detectar sub-região exata via Wi-Fi / GPS do navegador">
                 📍 Perto de mim
@@ -1053,6 +1505,48 @@
         </div>
     </div>
 
+    <!-- MODAL DE DIAGNOSTICO DE PRECISAO DO GPS / IP -->
+    <div id="gpsDiagnosisModal" class="modal-overlay" style="display: none;" onclick="if(event.target === this) closeGpsDiagnosisModal()">
+        <div class="modal-container">
+            <div class="modal-header">
+                <h3>📍 Diagnóstico de Precisão do Localizador</h3>
+                <button type="button" class="modal-close-btn" onclick="closeGpsDiagnosisModal()" title="Fechar">✕</button>
+            </div>
+            <div class="modal-body">
+                <div class="diag-item">
+                    <span class="diag-label">Coordenadas Recebidas:</span>
+                    <span class="diag-val" id="diagLatLon">--</span>
+                </div>
+                <div class="diag-item">
+                    <span class="diag-label">Raio de Precisão do Navegador:</span>
+                    <span class="diag-val" id="diagAccuracy">--</span>
+                </div>
+                <div class="diag-item">
+                    <span class="diag-label">Origem do Sinal Estimada:</span>
+                    <span class="diag-val" id="diagMethod">--</span>
+                </div>
+                <div class="diag-item">
+                    <span class="diag-label">Sub-região Mais Próxima Calculada:</span>
+                    <span class="diag-val" id="diagClosest">--</span>
+                </div>
+
+                <div id="diagNote"></div>
+
+                <div class="diag-tips">
+                    <h4>💡 Por que computadores via cabo apontam para o Centro do município?</h4>
+                    <ul>
+                        <li><strong>Smartphone / Celular:</strong> Possui chip GPS integrado por satélite. A precisão é métrica (±5 a 15 metros), identificando perfeitamente qualquer bairro (Cassino, Cidade Nova, Fragata, etc.).</li>
+                        <li><strong>Notebook / PC com Wi-Fi:</strong> Utiliza o serviço de localização por triangulação de redes Wi-Fi vizinhas (precisão de 15 a 50 metros).</li>
+                        <li><strong>Computador via Cabo de Rede (Ethernet):</strong> Sem GPS ou Wi-Fi ativo, o navegador recorre ao <strong>endereço IP público</strong> da operadora de internet (Vetorial, Claro, Vivo, etc.), cuja central/POP regional fica no <strong>Centro</strong> (margem de erro de ±15 a 50 km).</li>
+                    </ul>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" onclick="closeGpsDiagnosisModal()">Fechar</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Leaflet JS -->
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script>
@@ -1267,6 +1761,11 @@
             markersLayer = L.layerGroup().addTo(map);
             occurrenceLayerGroup = L.layerGroup().addTo(map);
             thermalOverlay = new ThermalFieldOverlay([]);
+
+            // Re-renderiza o mapa com zoom responsivo em qualquer camada ativa
+            map.on('zoomend', () => {
+                renderMapByActiveLayer();
+            });
         }
 
         function getRiskColor(level) {
@@ -1291,18 +1790,21 @@
             const legend = document.getElementById('mapDynamicLegend');
             if (layerName === 'risk') {
                 legend.innerHTML = `
-                    <span>Camada: <strong>Risco & Condições Atuais</strong></span>
+                    <span>Camada: <strong>Risco & Condições Regionais</strong></span>
                     <span>🟢 Baixo • 🟡 Médio • 🟠 Alto • 🔴 Muito Alto</span>
+                    <span style="opacity:0.8; font-size:0.72rem; color:#38bdf8;">• Dê zoom para ver subdivisões locais</span>
                 `;
             } else if (layerName === 'wind') {
                 legend.innerHTML = `
-                    <span>Camada: <strong>Vetores de Vento (Direção para onde sopra)</strong></span>
+                    <span>Camada: <strong>Vetores de Vento (Agrupamento Regional Despoluído)</strong></span>
                     <span>🔵 Fraco (&lt;25 km/h) • 🟡 Moderado (25–45 km/h) • 🔴 Forte (&gt;45 km/h)</span>
+                    <span style="opacity:0.8; font-size:0.72rem; color:#38bdf8;">• Dê zoom para ver subdivisões locais</span>
                 `;
             } else if (layerName === 'thermal') {
                 legend.innerHTML = `
-                    <span>Camada: <strong>Massas de Ar (Gradiente Térmico Regional)</strong></span>
-                    <span>🟦 Massa Mais Fria ➔ 🟩 Transição ➔ 🟧 Massa Mais Quente</span>
+                    <span>Camada: <strong>Massas de Ar & Temperatura Regional</strong></span>
+                    <span>🟦 Massa Fria ➔ 🟩 Transição ➔ 🟧 Massa Quente</span>
+                    <span style="opacity:0.8; font-size:0.72rem; color:#38bdf8;">• Dê zoom para ver subdivisões locais</span>
                 `;
             }
 
@@ -1324,22 +1826,439 @@
                 }
             }
 
+            const currentZoom = map ? map.getZoom() : 9;
+            const selectEl = document.getElementById('regionSelect');
+            const selectedRegionId = selectEl ? String(selectEl.value) : String(localStorage.getItem('climae_preferred_region_id') || '');
+
+            // =========================================================================
+            // FASE 1: VISÃO MACRORREGIONAL AGRUPADA (Zoom < 11: 8 Macro-Clusters Limpos)
+            // =========================================================================
+            if (currentZoom < 11) {
+                const grouped = {};
+                lastMapSummaryData.forEach(item => {
+                    const city = item.municipality || 'Outros';
+                    if (!grouped[city]) grouped[city] = [];
+                    grouped[city].push(item);
+                });
+
+                // Helper de prioridade de severidade de risco
+                const riskPriority = { 'Muito alto': 4, 'Alto': 3, 'Médio': 2, 'Baixo': 1, 'Inconclusivo': 0 };
+
+                Object.keys(grouped).forEach(city => {
+                    const items = grouped[city];
+                    if (!items.length) return;
+
+                    let sumLat = 0, sumLon = 0;
+                    let sumU = 0, sumV = 0, sumSpeed = 0, maxSpeed = 0;
+                    let sumTemp = 0, validTempCount = 0, minTemp = Infinity, maxTemp = -Infinity;
+                    let maxRiskLevel = 'Baixo', maxRiskScore = 0;
+
+                    items.forEach(it => {
+                        sumLat += it.latitude;
+                        sumLon += it.longitude;
+
+                        // Vento (vetorial)
+                        const s = it.wind_speed ?? 0;
+                        const dir = it.wind_direction ?? 0;
+                        sumSpeed += s;
+                        if (s > maxSpeed) maxSpeed = s;
+                        const rad = (dir * Math.PI) / 180;
+                        sumU += -s * Math.sin(rad);
+                        sumV += -s * Math.cos(rad);
+
+                        // Temperatura
+                        if (it.temperature_c !== null && it.temperature_c !== undefined) {
+                            sumTemp += it.temperature_c;
+                            validTempCount++;
+                            if (it.temperature_c < minTemp) minTemp = it.temperature_c;
+                            if (it.temperature_c > maxTemp) maxTemp = it.temperature_c;
+                        }
+
+                        // Risco predominante mais severo
+                        const currentPri = riskPriority[it.risk_level] ?? 0;
+                        const highestPri = riskPriority[maxRiskLevel] ?? 0;
+                        if (currentPri > highestPri || (currentPri === highestPri && (it.risk_score ?? 0) > maxRiskScore)) {
+                            maxRiskLevel = it.risk_level;
+                            maxRiskScore = it.risk_score ?? 0;
+                        }
+                    });
+
+                    const centerLat = sumLat / items.length;
+                    const centerLon = sumLon / items.length;
+                    const count = items.length;
+                    const isSelectedCity = items.some(it => String(it.region_id) === String(selectedRegionId));
+
+                    // 1. MACRO-CLUSTER DE RISCO & CONDIÇÕES
+                    if (activeMapLayer === 'risk') {
+                        const riskColor = getRiskColor(maxRiskLevel);
+                        let iconHtml = '';
+                        let iconSize = [44, 24];
+                        let iconAnchor = [22, 12];
+
+                        if (isSelectedCity) {
+                            iconHtml = `
+                                <div class="risk-macro-marker selected-region-pill" style="border-color: ${riskColor}; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.6), 0 0 6px ${riskColor}44;" title="${city} (${maxRiskLevel})">
+                                    <span class="risk-macro-dot" style="background: ${riskColor}; box-shadow: 0 0 8px ${riskColor};"></span>
+                                    <span class="risk-macro-city" style="color: #fff;">${city}</span>
+                                    <span>•</span>
+                                    <span class="risk-macro-level" style="color: #fff;">${maxRiskLevel} (${maxRiskScore.toFixed(0)})</span>
+                                </div>
+                            `;
+                            iconSize = [155, 34];
+                            iconAnchor = [77, 17];
+                        } else {
+                            iconHtml = `
+                                <div class="risk-macro-compact" style="border-color: ${riskColor}; box-shadow: 0 0 10px ${riskColor}55;">
+                                    <span class="risk-macro-dot" style="background: ${riskColor};"></span>
+                                    <span style="font-size: 0.68rem; font-weight: 800; color: ${riskColor};">${maxRiskScore.toFixed(0)}</span>
+                                </div>
+                            `;
+                            iconSize = [44, 22];
+                            iconAnchor = [22, 11];
+                        }
+
+                        const icon = L.divIcon({ html: iconHtml, className: '', iconSize: iconSize, iconAnchor: iconAnchor });
+                        const marker = L.marker([centerLat, centerLon], { icon });
+
+                        // Tooltip no hover (Alternativa 1 - Padrão Windy: sem colisão de textos)
+                        marker.bindTooltip(`
+                            <div style="font-weight: 700; color: #38bdf8; text-transform: uppercase; font-size: 0.72rem; letter-spacing: 0.05em; margin-bottom: 2px;">${city}</div>
+                            <div>Risco: <strong style="color:${riskColor};">${maxRiskLevel}</strong> (${maxRiskScore.toFixed(1)} pts)</div>
+                            <div style="font-size: 0.68rem; color: #94a3b8; margin-top: 2px;">Integrando ${count} bairros</div>
+                        `, {
+                            className: 'leaflet-tooltip-climae',
+                            direction: 'top',
+                            offset: isSelectedCity ? [0, -16] : [0, -12]
+                        });
+
+                        const subList = items.map(it => `
+                            <li style="display:flex; justify-content:space-between; margin-bottom:3px;">
+                                <span>${it.name}:</span>
+                                <strong style="color:${getRiskColor(it.risk_level)};">${it.risk_level} (${it.risk_score?.toFixed(1) ?? '--'} pts)</strong>
+                            </li>
+                        `).join('');
+
+                        marker.bindPopup(`
+                            <div style="font-family: Inter, sans-serif; color: #f8fafc; line-height: 1.5; font-size: 0.84rem; min-width: 240px;">
+                                <strong style="color: #38bdf8; font-size: 0.95rem;">🛡️ Risco Macrorregional — ${city}</strong><br>
+                                <div style="margin: 6px 0; padding: 6px 8px; background: rgba(15, 23, 42, 0.7); border-radius: 6px; border: 1px solid rgba(255,255,255,0.08);">
+                                    Severidade Máxima: <strong style="color:${riskColor};">${maxRiskLevel}</strong> (${maxRiskScore.toFixed(1)} pts)<br>
+                                    Sub-regiões integradas: <strong>${count} localidades</strong>
+                                </div>
+                                <div style="font-size: 0.75rem; color: #94a3b8; margin-top: 6px;">
+                                    <strong>Detalhamento por bairro:</strong>
+                                    <ul style="margin: 4px 0 0 0; padding-left: 14px; font-size: 0.75rem; color: #cbd5e1;">${subList}</ul>
+                                </div>
+                                <div style="font-size: 0.72rem; color: #38bdf8; margin-top: 8px; text-align: center;">
+                                    🔍 <em>Dê zoom no mapa para ver a divisão bairro a bairro.</em>
+                                </div>
+                            </div>
+                        `);
+
+                        marker.on('click', () => {
+                            const firstReg = items[0];
+                            if (firstReg) {
+                                document.getElementById('regionSelect').value = firstReg.region_id;
+                                savePreferredRegion(firstReg.region_id);
+                                onRegionChanged(firstReg.region_id);
+                            }
+                        });
+                        marker.addTo(markersLayer);
+                    }
+
+                    // 2. MACROVETOR DE VENTO (Alternativa 1 - Padrão Windy: Círculos Minimalistas + Destaque na Selecionada + Tooltip)
+                    else if (activeMapLayer === 'wind') {
+                        const avgSpeed = sumSpeed / count;
+                        const avgU = sumU / count;
+                        const avgV = sumV / count;
+                        const fromDeg = (Math.atan2(-avgU, -avgV) * (180 / Math.PI) + 360) % 360;
+                        const blowToDeg = (fromDeg + 180) % 360;
+                        const cardinalFrom = degreesToCardinal(fromDeg);
+
+                        let borderColor = '#38bdf8';
+                        let speedLabel = 'Fraco';
+                        if (avgSpeed >= 45) { borderColor = '#ef4444'; speedLabel = 'Forte'; }
+                        else if (avgSpeed >= 25) { borderColor = '#facc15'; speedLabel = 'Moderado'; }
+
+                        const gustNote = maxSpeed > avgSpeed + 3 ? `<span style="opacity:0.75; font-size:0.65rem;">(rajada ${maxSpeed.toFixed(0)})</span>` : '';
+
+                        let iconHtml = '';
+                        let iconSize = [48, 68];
+                        let iconAnchor = [24, 24];
+
+                        if (isSelectedCity) {
+                            iconHtml = `
+                                <div class="wind-macro-marker" title="${city} (${cardinalFrom} ${avgSpeed.toFixed(0)} km/h)">
+                                    <div class="wind-macro-circle" style="border-color: ${borderColor}; box-shadow: 0 2px 10px rgba(0, 0, 0, 0.6), 0 0 8px ${borderColor}33;">
+                                        <svg class="wind-macro-arrow" width="28" height="28" viewBox="0 0 24 24" style="transform: rotate(${blowToDeg.toFixed(0)}deg);">
+                                            <path d="M12 2L20 21L12 17L4 21L12 2Z" fill="${borderColor}"/>
+                                        </svg>
+                                    </div>
+                                    <div class="wind-macro-pill selected-region-pill" style="border-color: #bae6fd;">
+                                        <span style="color:#fff; font-weight:800;">${city}</span>
+                                        <span>•</span>
+                                        <span>${cardinalFrom} ${avgSpeed.toFixed(0)} km/h</span>
+                                        ${gustNote}
+                                    </div>
+                                </div>
+                            `;
+                            iconSize = [150, 75];
+                            iconAnchor = [75, 24];
+                        } else {
+                            iconHtml = `
+                                <div class="wind-macro-marker wind-macro-minimal" title="${city} (${cardinalFrom} ${avgSpeed.toFixed(0)} km/h)">
+                                    <div class="wind-macro-circle" style="border-color: ${borderColor}; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5), 0 0 6px ${borderColor}25;">
+                                        <svg class="wind-macro-arrow" width="26" height="26" viewBox="0 0 24 24" style="transform: rotate(${blowToDeg.toFixed(0)}deg);">
+                                            <path d="M12 2L20 21L12 17L4 21L12 2Z" fill="${borderColor}"/>
+                                        </svg>
+                                    </div>
+                                    <span class="wind-macro-speed-badge" style="border-color: ${borderColor}55;">${avgSpeed.toFixed(0)} km/h</span>
+                                </div>
+                            `;
+                            iconSize = [48, 68];
+                            iconAnchor = [24, 24];
+                        }
+
+                        const icon = L.divIcon({ html: iconHtml, className: '', iconSize: iconSize, iconAnchor: iconAnchor });
+                        const marker = L.marker([centerLat, centerLon], { icon });
+
+                        // Tooltip no hover (Padrão Windy: Nome da cidade e detalhes aparecem instantaneamente ao passar o mouse)
+                        marker.bindTooltip(`
+                            <div style="font-weight: 700; color: #38bdf8; text-transform: uppercase; font-size: 0.72rem; letter-spacing: 0.05em; margin-bottom: 2px;">${city}</div>
+                            <div>Vento Médio: <strong>${cardinalFrom} a ${avgSpeed.toFixed(0)} km/h</strong> ${maxSpeed > avgSpeed + 3 ? `(rajada até ${maxSpeed.toFixed(0)} km/h)` : ''}</div>
+                            <div style="font-size: 0.68rem; color: #94a3b8; margin-top: 2px;">Direção dominante: ${fromDeg.toFixed(0)}° (${count} bairros)</div>
+                        `, {
+                            className: 'leaflet-tooltip-climae',
+                            direction: 'top',
+                            offset: [0, -26]
+                        });
+
+                        const subList = items.map(it => `
+                            <li style="display:flex; justify-content:space-between; margin-bottom:3px;">
+                                <span>${it.name}:</span>
+                                <strong style="color:#bae6fd;">${it.wind_speed?.toFixed(1) ?? '--'} km/h (${degreesToCardinal(it.wind_direction)})</strong>
+                            </li>
+                        `).join('');
+
+                        marker.bindPopup(`
+                            <div style="font-family: Inter, sans-serif; color: #f8fafc; line-height: 1.5; font-size: 0.84rem; min-width: 230px;">
+                                <strong style="color: #38bdf8; font-size: 0.95rem;">💨 Macrovetor Regional — ${city}</strong><br>
+                                <div style="margin: 6px 0; padding: 6px 8px; background: rgba(15, 23, 42, 0.7); border-radius: 6px; border: 1px solid rgba(255,255,255,0.08);">
+                                    Direção Dominante: <strong>${cardinalFrom} (${fromDeg.toFixed(0)}°)</strong><br>
+                                    Velocidade Média: <strong>${avgSpeed.toFixed(1)} km/h</strong> (${speedLabel})<br>
+                                    Pico de Rajada: <strong>${maxSpeed.toFixed(1)} km/h</strong>
+                                </div>
+                                <div style="font-size: 0.75rem; color: #94a3b8; margin-top: 6px;">
+                                    <strong>Sub-regiões integradas (${count}):</strong>
+                                    <ul style="margin: 4px 0 0 0; padding-left: 14px; font-size: 0.75rem; color: #cbd5e1;">${subList}</ul>
+                                </div>
+                                <div style="font-size: 0.72rem; color: #38bdf8; margin-top: 8px; text-align: center;">
+                                    🔍 <em>Dê zoom no mapa para desmembrar as setas bairro a bairro.</em>
+                                </div>
+                            </div>
+                        `);
+
+                        marker.on('click', () => {
+                            const firstReg = items[0];
+                            if (firstReg) {
+                                document.getElementById('regionSelect').value = firstReg.region_id;
+                                savePreferredRegion(firstReg.region_id);
+                                onRegionChanged(firstReg.region_id);
+                            }
+                        });
+                        marker.addTo(markersLayer);
+                    }
+
+                    // 3. MACRO-BADGE TÉRMICO (Alternativa 1 - Padrão Windy: Temperatura Compacta + Destaque na Selecionada + Tooltip)
+                    else if (activeMapLayer === 'thermal') {
+                        const avgTemp = validTempCount > 0 ? (sumTemp / validTempCount) : null;
+                        const avgTempStr = avgTemp !== null ? `${avgTemp.toFixed(1)} °C` : '--';
+                        const rangeStr = (validTempCount > 1 && (maxTemp - minTemp) >= 0.5)
+                            ? `(${minTemp.toFixed(1)}° a ${maxTemp.toFixed(1)}°)`
+                            : '';
+
+                        let iconHtml = '';
+                        let iconSize = [48, 24];
+                        let iconAnchor = [24, 12];
+
+                        if (isSelectedCity) {
+                            iconHtml = `
+                                <div class="thermal-macro-marker selected-region-pill" title="Massa de Ar: ${city} (Média ${avgTempStr})">
+                                    <span style="color:#fff; font-weight:800; font-size:0.68rem; text-transform:uppercase;">${city}</span>
+                                    <span class="thermal-macro-temp" style="color:#fff;">${avgTempStr}</span>
+                                    ${rangeStr ? `<span style="font-size:0.62rem; color:#e0f2fe;">${rangeStr}</span>` : ''}
+                                </div>
+                            `;
+                            iconSize = [150, 36];
+                            iconAnchor = [75, 18];
+                        } else {
+                            iconHtml = `
+                                <div class="thermal-macro-compact" title="${city} (${avgTempStr})">
+                                    <span style="font-weight: 800; color: #fff; font-size: 0.72rem; font-family: monospace;">${avgTemp !== null ? avgTemp.toFixed(1) + '°' : '--'}</span>
+                                </div>
+                            `;
+                            iconSize = [48, 22];
+                            iconAnchor = [24, 11];
+                        }
+
+                        const icon = L.divIcon({ html: iconHtml, className: '', iconSize: iconSize, iconAnchor: iconAnchor });
+                        const marker = L.marker([centerLat, centerLon], { icon });
+
+                        // Tooltip no hover (Padrão Windy: Mostra nome da cidade e detalhes térmicos no hover)
+                        marker.bindTooltip(`
+                            <div style="font-weight: 700; color: #38bdf8; text-transform: uppercase; font-size: 0.72rem; letter-spacing: 0.05em; margin-bottom: 2px;">${city}</div>
+                            <div>Temperatura Média: <strong>${avgTempStr}</strong></div>
+                            ${rangeStr ? `<div style="font-size: 0.68rem; color: #94a3b8; margin-top: 2px;">Variação: ${minTemp.toFixed(1)}° a ${maxTemp.toFixed(1)}° (${count} bairros)</div>` : ''}
+                        `, {
+                            className: 'leaflet-tooltip-climae',
+                            direction: 'top',
+                            offset: isSelectedCity ? [0, -18] : [0, -12]
+                        });
+
+                        const subList = items.map(it => `
+                            <li style="display:flex; justify-content:space-between; margin-bottom:3px;">
+                                <span>${it.name}:</span>
+                                <strong style="color:#bae6fd;">${it.temperature_c !== null ? it.temperature_c.toFixed(1) + ' °C' : '--'}</strong>
+                            </li>
+                        `).join('');
+
+                        marker.bindPopup(`
+                            <div style="font-family: Inter, sans-serif; color: #f8fafc; line-height: 1.5; font-size: 0.84rem; min-width: 230px;">
+                                <strong style="color: #38bdf8; font-size: 0.95rem;">🌡️ Massa de Ar Térmica — ${city}</strong><br>
+                                <div style="margin: 6px 0; padding: 6px 8px; background: rgba(15, 23, 42, 0.7); border-radius: 6px; border: 1px solid rgba(255,255,255,0.08);">
+                                    Temperatura Média: <strong>${avgTempStr}</strong><br>
+                                    ${validTempCount > 1 ? `Variação no Município: <strong>${minTemp.toFixed(1)} °C</strong> a <strong>${maxTemp.toFixed(1)} °C</strong>` : ''}
+                                </div>
+                                <div style="font-size: 0.75rem; color: #94a3b8; margin-top: 6px;">
+                                    <strong>Temperaturas por sub-região (${items.length}):</strong>
+                                    <ul style="margin: 4px 0 0 0; padding-left: 14px; font-size: 0.75rem; color: #cbd5e1;">${subList}</ul>
+                                </div>
+                                <div style="font-size: 0.72rem; color: #38bdf8; margin-top: 8px; text-align: center;">
+                                    🔍 <em>Dê zoom no mapa para ver a temperatura exata de cada bairro.</em>
+                                </div>
+                            </div>
+                        `);
+
+                        marker.on('click', () => {
+                            const firstReg = items[0];
+                            if (firstReg) {
+                                document.getElementById('regionSelect').value = firstReg.region_id;
+                                savePreferredRegion(firstReg.region_id);
+                                onRegionChanged(firstReg.region_id);
+                            }
+                        });
+                        marker.addTo(markersLayer);
+                    }
+                });
+
+                return; // Encerra renderização da visão macrorregional despoluída
+            }
+
+            // =========================================================================
+            // FASE 2: VISÃO LOCAL BAIRRO A BAIRRO (Zoom >= 11: Revelação Progressiva por Zoom e Proximidade)
+            // =========================================================================
+            // Helper de distância geodésica em km
+            const getDistKm = (lat1, lon1, lat2, lon2) => {
+                const R = 6371;
+                const dLat = (lat2 - lat1) * Math.PI / 180;
+                const dLon = (lon2 - lon1) * Math.PI / 180;
+                const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+                          Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+                          Math.sin(dLon/2) * Math.sin(dLon/2);
+                return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+            };
+
+            const selectedItem = lastMapSummaryData.find(it => String(it.region_id) === String(selectedRegionId));
+
             lastMapSummaryData.forEach(item => {
                 let marker;
+                const isSelected = String(item.region_id) === String(selectedRegionId);
 
+                // Cálculo da revelação progressiva do rótulo da região:
+                // Zoom 11: apenas a região selecionada tem rótulo fixo (outras só em hover)
+                // Zoom 12: bairros vizinhos imediatos (até 8 km) mostram rótulo secundário
+                // Zoom 13: bairros em até 22 km (ou mesmo município) mostram rótulo secundário
+                // Zoom 14+: todos os bairros na tela mostram seu rótulo secundário
+                let showSecondaryLabel = false;
+                if (!isSelected) {
+                    if (currentZoom >= 14) {
+                        showSecondaryLabel = true;
+                    } else if (currentZoom === 13) {
+                        if (selectedItem) {
+                            const d = getDistKm(selectedItem.latitude, selectedItem.longitude, item.latitude, item.longitude);
+                            if (d <= 22 || item.municipality === selectedItem.municipality) {
+                                showSecondaryLabel = true;
+                            }
+                        } else {
+                            showSecondaryLabel = true;
+                        }
+                    } else if (currentZoom === 12) {
+                        if (selectedItem) {
+                            const d = getDistKm(selectedItem.latitude, selectedItem.longitude, item.latitude, item.longitude);
+                            if (d <= 8) {
+                                showSecondaryLabel = true;
+                            }
+                        }
+                    }
+                }
+
+                // --- 1. RISCO LOCAL (Revelação adaptativa com destaque suave) ---
                 if (activeMapLayer === 'risk') {
                     const color = getRiskColor(item.risk_level);
-                    marker = L.circleMarker([item.latitude, item.longitude], {
-                        radius: 10,
-                        fillColor: color,
-                        color: '#0f172a',
-                        weight: 2,
-                        fillOpacity: 0.9
-                    });
-                } else if (activeMapLayer === 'wind') {
+
+                    if (isSelected) {
+                        const iconHtml = `
+                            <div style="display:flex; flex-direction:column; align-items:center; cursor:pointer;">
+                                <div style="width:18px; height:18px; border-radius:50%; background:${color}; border:2px solid #fff; box-shadow:0 2px 6px rgba(0,0,0,0.6), 0 0 5px ${color}55;"></div>
+                                <span class="selected-region-pill">📍 ${item.name} (${item.risk_level})</span>
+                            </div>
+                        `;
+                        const icon = L.divIcon({ html: iconHtml, className: '', iconSize: [140, 46], iconAnchor: [70, 9] });
+                        marker = L.marker([item.latitude, item.longitude], { icon });
+                    } else if (showSecondaryLabel) {
+                        const iconHtml = `
+                            <div style="display:flex; flex-direction:column; align-items:center; cursor:pointer;">
+                                <div style="width:12px; height:12px; border-radius:50%; background:${color}; border:1.5px solid #0f172a; box-shadow:0 1px 4px rgba(0,0,0,0.5);"></div>
+                                <span class="neighborhood-label-secondary">${item.name}</span>
+                            </div>
+                        `;
+                        const icon = L.divIcon({ html: iconHtml, className: '', iconSize: [110, 36], iconAnchor: [55, 6] });
+                        marker = L.marker([item.latitude, item.longitude], { icon });
+
+                        marker.bindTooltip(`
+                            <strong>${item.name}</strong> (${item.municipality})<br>
+                            <span style="color:${color}; font-weight:700;">Risco: ${item.risk_level} (${item.risk_score?.toFixed(1) ?? '--'} pts)</span><br>
+                            Temp: <strong>${item.temperature_c ?? '--'} °C</strong> | Vento: <strong>${item.wind_speed ?? '--'} km/h</strong>
+                        `, {
+                            className: 'leaflet-tooltip-climae',
+                            direction: 'top',
+                            offset: [0, -10]
+                        });
+                    } else {
+                        marker = L.circleMarker([item.latitude, item.longitude], {
+                            radius: 8,
+                            fillColor: color,
+                            color: '#0f172a',
+                            weight: 2,
+                            fillOpacity: 0.95
+                        });
+
+                        marker.bindTooltip(`
+                            <strong>${item.name}</strong> (${item.municipality})<br>
+                            <span style="color:${color}; font-weight:700;">Risco: ${item.risk_level} (${item.risk_score?.toFixed(1) ?? '--'} pts)</span><br>
+                            Temp: <strong>${item.temperature_c ?? '--'} °C</strong> | Vento: <strong>${item.wind_speed ?? '--'} km/h</strong>
+                        `, {
+                            className: 'leaflet-tooltip-climae',
+                            direction: 'top',
+                            offset: [0, -8]
+                        });
+                    }
+                }
+
+                // --- 2. VENTO LOCAL (Revelação adaptativa das setas e nomes) ---
+                else if (activeMapLayer === 'wind') {
                     const speed = item.wind_speed ?? 0;
                     const fromDeg = item.wind_direction ?? 0;
-                    // Na meteorologia, wind_direction é de onde o vento VEM. Somamos 180° para apontar para onde ele SOPRA.
                     const blowToDeg = (fromDeg + 180) % 360;
                     const cardinalFrom = degreesToCardinal(fromDeg);
 
@@ -1347,33 +2266,116 @@
                     if (speed >= 45) borderColor = '#ef4444';
                     else if (speed >= 25) borderColor = '#facc15';
 
-                    const iconHtml = `
-                        <div class="wind-vector-marker">
-                            <div class="wind-arrow-circle" style="border-color: ${borderColor};">
-                                <svg width="20" height="20" viewBox="0 0 24 24" style="transform: rotate(${blowToDeg}deg);">
+                    if (isSelected) {
+                        const iconHtml = `
+                            <div class="wind-vector-marker active" style="cursor:pointer;">
+                                <div class="wind-arrow-circle" style="border-color:${borderColor}; box-shadow:0 2px 8px rgba(0,0,0,0.6), 0 0 6px ${borderColor}33;">
+                                    <svg width="20" height="20" viewBox="0 0 24 24" style="transform: rotate(${blowToDeg}deg);">
+                                        <path d="M12 2L19 21L12 17L5 21L12 2Z" fill="${borderColor}"/>
+                                    </svg>
+                                </div>
+                                <span class="selected-region-pill">📍 ${item.name} • ${cardinalFrom} ${speed.toFixed(0)} km/h</span>
+                            </div>
+                        `;
+                        const icon = L.divIcon({ html: iconHtml, className: '', iconSize: [150, 56], iconAnchor: [75, 17] });
+                        marker = L.marker([item.latitude, item.longitude], { icon });
+                    } else if (showSecondaryLabel) {
+                        const iconHtml = `
+                            <div style="display:flex; flex-direction:column; align-items:center; cursor:pointer;">
+                                <div class="wind-vector-compact" style="border-color:${borderColor}; width:24px; height:24px;" title="${item.name}: ${cardinalFrom} ${speed.toFixed(0)} km/h">
+                                    <svg width="14" height="14" viewBox="0 0 24 24" style="transform: rotate(${blowToDeg}deg);">
+                                        <path d="M12 2L19 21L12 17L5 21L12 2Z" fill="${borderColor}"/>
+                                    </svg>
+                                </div>
+                                <span class="neighborhood-label-secondary">${item.name} • ${speed.toFixed(0)} km/h</span>
+                            </div>
+                        `;
+                        const icon = L.divIcon({ html: iconHtml, className: '', iconSize: [120, 48], iconAnchor: [60, 12] });
+                        marker = L.marker([item.latitude, item.longitude], { icon });
+
+                        marker.bindTooltip(`
+                            <strong>${item.name}</strong> (${item.municipality})<br>
+                            💨 Vento: <strong style="color:${borderColor};">${cardinalFrom} ${speed.toFixed(1)} km/h</strong> (Origem: ${fromDeg}°)<br>
+                            Temp: <strong>${item.temperature_c ?? '--'} °C</strong>
+                        `, {
+                            className: 'leaflet-tooltip-climae',
+                            direction: 'top',
+                            offset: [0, -14]
+                        });
+                    } else {
+                        const iconHtml = `
+                            <div class="wind-vector-compact" style="border-color:${borderColor};" title="${item.name}: ${cardinalFrom} ${speed.toFixed(0)} km/h">
+                                <svg width="15" height="15" viewBox="0 0 24 24" style="transform: rotate(${blowToDeg}deg);">
                                     <path d="M12 2L19 21L12 17L5 21L12 2Z" fill="${borderColor}"/>
                                 </svg>
                             </div>
-                            <span class="wind-label-pill">${cardinalFrom} ${speed.toFixed(0)} km/h</span>
-                        </div>
-                    `;
-                    const icon = L.divIcon({
-                        html: iconHtml,
-                        className: '',
-                        iconSize: [70, 52],
-                        iconAnchor: [35, 26]
-                    });
-                    marker = L.marker([item.latitude, item.longitude], { icon });
-                } else if (activeMapLayer === 'thermal') {
+                        `;
+                        const icon = L.divIcon({ html: iconHtml, className: '', iconSize: [26, 26], iconAnchor: [13, 13] });
+                        marker = L.marker([item.latitude, item.longitude], { icon });
+
+                        marker.bindTooltip(`
+                            <strong>${item.name}</strong> (${item.municipality})<br>
+                            💨 Vento: <strong style="color:${borderColor};">${cardinalFrom} ${speed.toFixed(1)} km/h</strong> (Origem: ${fromDeg}°)<br>
+                            Temp: <strong>${item.temperature_c ?? '--'} °C</strong>
+                        `, {
+                            className: 'leaflet-tooltip-climae',
+                            direction: 'top',
+                            offset: [0, -14]
+                        });
+                    }
+                }
+
+                // --- 3. MASSAS DE AR LOCAL (Revelação adaptativa térmica) ---
+                else if (activeMapLayer === 'thermal') {
                     const temp = item.temperature_c !== null ? `${item.temperature_c.toFixed(1)} °C` : '--';
-                    const iconHtml = `<div class="thermal-badge-marker">${temp}</div>`;
-                    const icon = L.divIcon({
-                        html: iconHtml,
-                        className: '',
-                        iconSize: [64, 24],
-                        iconAnchor: [32, 12]
-                    });
-                    marker = L.marker([item.latitude, item.longitude], { icon });
+
+                    if (isSelected) {
+                        const iconHtml = `
+                            <div style="display:flex; flex-direction:column; align-items:center; cursor:pointer;">
+                                <div class="thermal-dot-compact" style="border-color:#38bdf8; background:rgba(15,23,42,0.94); color:#38bdf8; font-size:0.75rem; padding:3px 8px; box-shadow:0 2px 8px rgba(0,0,0,0.6), 0 0 6px rgba(56,189,248,0.25);">
+                                    ${temp}
+                                </div>
+                                <span class="selected-region-pill">📍 ${item.name}</span>
+                            </div>
+                        `;
+                        const icon = L.divIcon({ html: iconHtml, className: '', iconSize: [120, 48], iconAnchor: [60, 12] });
+                        marker = L.marker([item.latitude, item.longitude], { icon });
+                    } else if (showSecondaryLabel) {
+                        const iconHtml = `
+                            <div style="display:flex; flex-direction:column; align-items:center; cursor:pointer;">
+                                <div class="thermal-dot-compact" style="font-size:0.68rem; padding:1px 6px;">
+                                    ${temp}
+                                </div>
+                                <span class="neighborhood-label-secondary">${item.name}</span>
+                            </div>
+                        `;
+                        const icon = L.divIcon({ html: iconHtml, className: '', iconSize: [100, 44], iconAnchor: [50, 11] });
+                        marker = L.marker([item.latitude, item.longitude], { icon });
+
+                        marker.bindTooltip(`
+                            <strong>${item.name}</strong> (${item.municipality})<br>
+                            🌡️ Temperatura: <strong>${temp}</strong><br>
+                            💧 Umidade: <strong>${item.humidity_percent ?? '--'}%</strong>
+                        `, {
+                            className: 'leaflet-tooltip-climae',
+                            direction: 'top',
+                            offset: [0, -14]
+                        });
+                    } else {
+                        const iconHtml = `<div class="thermal-dot-compact" title="${item.name}: ${temp}">${temp}</div>`;
+                        const icon = L.divIcon({ html: iconHtml, className: '', iconSize: [52, 22], iconAnchor: [26, 11] });
+                        marker = L.marker([item.latitude, item.longitude], { icon });
+
+                        marker.bindTooltip(`
+                            <strong>${item.name}</strong> (${item.municipality})<br>
+                            🌡️ Temperatura: <strong>${temp}</strong><br>
+                            💧 Umidade: <strong>${item.humidity_percent ?? '--'}%</strong>
+                        `, {
+                            className: 'leaflet-tooltip-climae',
+                            direction: 'top',
+                            offset: [0, -12]
+                        });
+                    }
                 }
 
                 if (marker) {
@@ -1390,7 +2392,17 @@
 
                     marker.on('click', () => {
                         document.getElementById('regionSelect').value = item.region_id;
-                        localStorage.setItem('climae_preferred_region_id', item.region_id);
+                        savePreferredRegion(item.region_id);
+                        const sel = document.getElementById('regionSelect');
+                        const opt = sel.querySelector(`option[value="${item.region_id}"]`);
+                        const feedback = document.getElementById('locFeedback');
+                        if (feedback && opt) {
+                            feedback.innerHTML = `
+                                <span class="badge-gps-high" style="cursor:pointer;" onclick="showGpsDiagnosisModal()" title="Localidade fixada pelo mapa">
+                                    📍 ${opt.text.trim()} (Fixado) ℹ️
+                                </span>
+                            `;
+                        }
                         onRegionChanged(item.region_id);
                     });
 
@@ -1756,6 +2768,104 @@
             `;
         }
 
+        let lastGpsDiagnosis = null;
+
+        function closeGpsDiagnosisModal() {
+            const modal = document.getElementById('gpsDiagnosisModal');
+            if (modal) modal.style.display = 'none';
+        }
+
+        function showGpsDiagnosisModal() {
+            if (!lastGpsDiagnosis) return;
+            const d = lastGpsDiagnosis;
+            const modal = document.getElementById('gpsDiagnosisModal');
+            if (!modal) return;
+
+            document.getElementById('diagLatLon').innerText = `${d.userLat.toFixed(5)}, ${d.userLon.toFixed(5)}`;
+            document.getElementById('diagAccuracy').innerText = (d.accuracy !== null && !isNaN(d.accuracy))
+                ? `±${d.accuracy < 1000 ? Math.round(d.accuracy) + ' metros' : (d.accuracy / 1000).toFixed(1) + ' km'}`
+                : 'Não informada';
+            document.getElementById('diagMethod').innerText = d.methodDescription;
+            document.getElementById('diagClosest').innerText = `${d.closestName} (a ${d.minDistance.toFixed(2)} km)`;
+
+            const noteEl = document.getElementById('diagNote');
+            if (d.accuracy > 3000) {
+                const select = document.getElementById('regionSelect');
+                const currentOpt = select.querySelector(`option[value="${d.closestId}"]`);
+                const optGroup = currentOpt ? currentOpt.closest('optgroup') : null;
+                let subregionsHtml = '';
+                if (optGroup) {
+                    const groupLabel = optGroup.label ? optGroup.label.replace('📍', '').trim() : 'seu município';
+                    subregionsHtml = `
+                        <div style="margin-top:12px; border-top:1px solid rgba(239,68,68,0.25); padding-top:10px;">
+                            <span style="font-weight:600; font-size:0.82rem; color:#bae6fd;">Confirme seu bairro em ${groupLabel} com 1 clique para fixar:</span>
+                            <div style="display:flex; flex-wrap:wrap; gap:6px; margin-top:8px;">
+                    `;
+                    Array.from(optGroup.querySelectorAll('option')).forEach(opt => {
+                        const isCurrent = String(opt.value) === String(d.closestId);
+                        let cleanName = opt.text.trim();
+                        const match = cleanName.match(/\((.+)\)/);
+                        if (match) cleanName = match[1];
+                        subregionsHtml += `
+                            <button type="button" class="btn" style="padding:5px 10px; font-size:0.8rem; border-radius:6px; ${isCurrent ? 'background:rgba(56, 189, 248, 0.35); border:1px solid #38bdf8; color:#fff;' : 'background:rgba(255,255,255,0.08); border:1px solid rgba(255,255,255,0.15); color:#cbd5e1;'}" onclick="forceSwitchToRegion('${opt.value}')">
+                                📍 ${cleanName}
+                            </button>
+                        `;
+                    });
+                    subregionsHtml += `
+                            </div>
+                        </div>
+                    `;
+                }
+
+                noteEl.innerHTML = `
+                    <div style="background:rgba(239, 68, 68, 0.12); border:1px solid rgba(239, 68, 68, 0.35); border-radius:8px; padding:12px; margin-top:8px; font-size:0.83rem; color:#fca5a5; line-height:1.45;">
+                        <strong>⚠️ Por que o navegador apontou para o Centro?</strong><br>
+                        Esta máquina está utilizando <strong>geolocalização por IP do provedor</strong> (margem de erro estimada: ±${(d.accuracy/1000).toFixed(0)} km). No Rio Grande do Sul, as conexões de fibra de cada município passam pela central/POP no Centro.<br><br>
+                        Como navegadores em desktops via cabo não contam com receptor GPS ou Wi-Fi para escanear redes vizinhas, o navegador estima a posição da central da operadora.<br>
+                        ${subregionsHtml}
+                    </div>
+                `;
+            } else {
+                noteEl.innerHTML = `
+                    <div style="background:rgba(16, 185, 129, 0.12); border:1px solid rgba(16, 185, 129, 0.35); border-radius:8px; padding:12px; margin-top:8px; font-size:0.83rem; color:#6ee7b7; line-height:1.45;">
+                        <strong>🟢 Localização com Alta Precisão:</strong><br>
+                        Coordenadas obtidas com precisão métrica (±${Math.round(d.accuracy)} m) via receptor GPS ou triangulação Wi-Fi. Sub-região identificada com sucesso!
+                    </div>
+                `;
+            }
+            modal.style.display = 'flex';
+        }
+
+        function savePreferredRegion(regionId) {
+            if (!regionId) return;
+            try {
+                localStorage.setItem('climae_preferred_region_id', String(regionId));
+                document.cookie = `climae_preferred_region_id=${regionId};path=/;max-age=31536000;SameSite=Lax`;
+            } catch (e) {
+                console.warn("Falha ao salvar preferência de região:", e);
+            }
+        }
+
+        function forceSwitchToRegion(regionId) {
+            const select = document.getElementById('regionSelect');
+            const targetOpt = select.querySelector(`option[value="${regionId}"]`);
+            if (targetOpt) {
+                select.value = regionId;
+                savePreferredRegion(regionId);
+                onRegionChanged(regionId);
+                closeGpsDiagnosisModal();
+                const feedback = document.getElementById('locFeedback');
+                if (feedback) {
+                    feedback.innerHTML = `
+                        <span class="badge-gps-high" style="cursor:pointer;" onclick="showGpsDiagnosisModal()" title="Localidade fixada manualmente">
+                            📍 ${targetOpt.text.trim()} (Fixado) ℹ️
+                        </span>
+                    `;
+                }
+            }
+        }
+
         // Fórmula de Haversine: calcula a distância em km entre duas coordenadas (Lat/Lon)
         function getDistanceKm(lat1, lon1, lat2, lon2) {
             const R = 6371; // Raio da Terra em km
@@ -1770,10 +2880,11 @@
         }
 
         // Encontra a região cadastrada mais próxima das coordenadas (lat, lon) do usuário
-        function selectClosestRegion(userLat, userLon, sourceLabel) {
+        function selectClosestRegion(userLat, userLon, sourceLabel, accuracy = null, isUserClick = false) {
             const select = document.getElementById('regionSelect');
             const options = Array.from(select.options);
             let closestId = null;
+            let closestName = '';
             let minDistance = Infinity;
 
             options.forEach(opt => {
@@ -1784,30 +2895,83 @@
                     if (dist < minDistance) {
                         minDistance = dist;
                         closestId = opt.value;
+                        closestName = opt.text.trim();
                     }
                 }
             });
 
+            // Determina método e badge
+            let methodDesc = '';
+            let badgeClass = '';
+            let shortText = '';
+
+            if (accuracy === null || isNaN(accuracy)) {
+                methodDesc = 'Estimativa de Rede / IP';
+                badgeClass = 'badge-gps-med';
+                shortText = `📍 ${closestName}`;
+            } else if (accuracy <= 250) {
+                methodDesc = 'GPS Físico ou Triangulação Wi-Fi (Alta Precisão)';
+                badgeClass = 'badge-gps-high';
+                shortText = `🟢 GPS/Wi-Fi (±${Math.round(accuracy)}m)`;
+            } else if (accuracy <= 3000) {
+                methodDesc = 'Triangulação Ampla de Rádio / Wi-Fi (Precisão Moderada)';
+                badgeClass = 'badge-gps-med';
+                shortText = `🟡 Wi-Fi (±${(accuracy/1000).toFixed(1)}km)`;
+            } else {
+                methodDesc = 'Provedor de Internet / IP Central (Precisão Baixa no Desktop)';
+                badgeClass = 'badge-gps-low';
+                shortText = `⚠️ IP Provedor (±${(accuracy/1000).toFixed(0)}km)`;
+            }
+
+            lastGpsDiagnosis = {
+                userLat,
+                userLon,
+                accuracy,
+                closestId,
+                closestName,
+                minDistance,
+                methodDescription: methodDesc,
+                sourceLabel
+            };
+
             if (closestId) {
                 select.value = closestId;
-                localStorage.setItem('climae_preferred_region_id', closestId);
+                savePreferredRegion(closestId);
                 onRegionChanged(closestId);
 
                 const feedback = document.getElementById('locFeedback');
                 if (feedback) {
-                    feedback.innerText = '';
+                    feedback.innerHTML = `
+                        <span class="${badgeClass}" style="cursor:pointer; display:inline-flex; align-items:center; gap:4px;" onclick="showGpsDiagnosisModal()" title="Clique para ver o relatório técnico de precisão do GPS/IP">
+                            ${shortText} <span style="font-size:0.7rem; opacity:0.8;">ℹ️</span>
+                        </span>
+                    `;
+                }
+
+                // Se o usuário clicou no botão e a precisão foi baixa (> 3 km), abre o diagnóstico automaticamente
+                if (isUserClick && accuracy > 3000) {
+                    showGpsDiagnosisModal();
                 }
             }
         }
 
-        // 1. Auto-detecção silenciosa por IP (1ª visita, sem pop-up de permissão)
+        // 1. Auto-detecção inteligente (Memória/Cookie -> IP -> Fallback)
         async function autoDetectRegionOnLoad() {
             const select = document.getElementById('regionSelect');
             const savedRegionId = localStorage.getItem('climae_preferred_region_id');
 
-            // Se já existe preferência salva no navegador, usa imediatamente (0 gasto de API)
+            // Se já existe preferência salva no navegador, restaura e exibe o badge fixado imediatamente
             if (savedRegionId && select.querySelector(`option[value="${savedRegionId}"]`)) {
                 select.value = savedRegionId;
+                const opt = select.querySelector(`option[value="${savedRegionId}"]`);
+                const feedback = document.getElementById('locFeedback');
+                if (feedback && opt) {
+                    feedback.innerHTML = `
+                        <span class="badge-gps-high" style="cursor:pointer;" onclick="showGpsDiagnosisModal()" title="Localidade salva e fixada na memória do navegador">
+                            📍 ${opt.text.trim()} (Fixado) ℹ️
+                        </span>
+                    `;
+                }
                 onRegionChanged(savedRegionId);
                 return;
             }
@@ -1818,7 +2982,7 @@
                 if (res.ok) {
                     const ipData = await res.json();
                     if (ipData.latitude && ipData.longitude) {
-                        selectClosestRegion(ipData.latitude, ipData.longitude, 'Via IP');
+                        selectClosestRegion(ipData.latitude, ipData.longitude, 'Via IP', 25000, false);
                         return;
                     }
                 }
@@ -1835,27 +2999,41 @@
         // 2. Detecção de alta precisão sob demanda (Wi-Fi / GPS Nativo do navegador)
         function locateByBrowserGPS() {
             const feedback = document.getElementById('locFeedback');
+            const btn = document.getElementById('btnLocateMe');
             if (!navigator.geolocation) {
                 if (feedback) {
-                    feedback.innerText = "(Geolocalização não suportada)";
+                    feedback.innerHTML = '<span style="color:#f87171;">⚠️ Geolocalização não suportada</span>';
                     setTimeout(() => { if (feedback) feedback.innerText = ''; }, 3500);
                 }
                 return;
             }
 
-            if (feedback) feedback.innerText = "Localizando...";
+            if (feedback) {
+                feedback.innerHTML = '<span style="color:#38bdf8;">🔄 Detectando sinal...</span>';
+            }
+            if (btn) btn.disabled = true;
+
             navigator.geolocation.getCurrentPosition(
                 (pos) => {
-                    selectClosestRegion(pos.coords.latitude, pos.coords.longitude, 'GPS/Wi-Fi');
+                    if (btn) btn.disabled = false;
+                    const lat = pos.coords.latitude;
+                    const lon = pos.coords.longitude;
+                    const acc = pos.coords.accuracy;
+                    selectClosestRegion(lat, lon, 'GPS do Navegador', acc, true);
                 },
                 (err) => {
+                    if (btn) btn.disabled = false;
                     console.warn("Permissão negada ou falha no GPS:", err);
+                    let errMsg = "Falha ao obter localização";
+                    if (err.code === 1) errMsg = "Permissão negada no navegador";
+                    else if (err.code === 2) errMsg = "Sinal indisponível na máquina";
+                    else if (err.code === 3) errMsg = "Tempo limite esgotado";
                     if (feedback) {
-                        feedback.innerText = "(Permissão negada)";
-                        setTimeout(() => { if (feedback) feedback.innerText = ''; }, 3500);
+                        feedback.innerHTML = `<span style="color:#f87171;" title="${err.message}">⚠️ ${errMsg}</span>`;
+                        setTimeout(() => { if (feedback) feedback.innerText = ''; }, 4500);
                     }
                 },
-                { enableHighAccuracy: true, timeout: 8000 }
+                { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
             );
         }
 
@@ -2017,6 +3195,7 @@
         const loadRiskForRegion = loadRegionRisk;
 
         async function onRegionChanged(regionId) {
+            renderMapByActiveLayer(); // Atualiza o destaque do pino ativo no mapa imediatamente
             await Promise.all([
                 loadRegionWeather(regionId),
                 loadRegionRisk(regionId),
@@ -2037,9 +3216,17 @@
 
             const select = document.getElementById('regionSelect');
             select.addEventListener('change', (e) => {
-                // Salva a escolha manual do usuário para os próximos acessos
-                localStorage.setItem('climae_preferred_region_id', e.target.value);
-                document.getElementById('locFeedback').innerText = '';
+                // Salva a escolha manual do usuário para os próximos acessos (Memória Local e Cookie)
+                savePreferredRegion(e.target.value);
+                const opt = select.querySelector(`option[value="${e.target.value}"]`);
+                const feedback = document.getElementById('locFeedback');
+                if (feedback && opt) {
+                    feedback.innerHTML = `
+                        <span class="badge-gps-high" style="cursor:pointer;" onclick="showGpsDiagnosisModal()" title="Localidade fixada manualmente">
+                            📍 ${opt.text.trim()} (Fixado) ℹ️
+                        </span>
+                    `;
+                }
                 onRegionChanged(e.target.value);
             });
 

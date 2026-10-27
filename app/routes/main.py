@@ -9,7 +9,8 @@ main_bp = Blueprint('main', __name__)
 @main_bp.route('/')
 def index():
     regions = Region.query.order_by(Region.municipality, Region.name).all()
-    return render_template('index.html', regions=regions)
+    preferred_id = request.cookies.get('climae_preferred_region_id')
+    return render_template('index.html', regions=regions, preferred_id=preferred_id)
 
 @main_bp.route('/api/regions')
 def api_regions():

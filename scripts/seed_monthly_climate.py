@@ -5,6 +5,17 @@ from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 import requests
 
+if sys.stdout.encoding and sys.stdout.encoding.lower() != 'utf-8':
+    try:
+        sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+    except Exception:
+        pass
+if sys.stderr.encoding and sys.stderr.encoding.lower() != 'utf-8':
+    try:
+        sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+    except Exception:
+        pass
+
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from app import create_app
@@ -16,8 +27,8 @@ START_DATE = "2000-01-01"
 
 def fetch_daily_archive(lat: float, lon: float, start_date: str, end_date: str) -> dict | None:
     """
-    Busca a série diária histórica da reanálise ERA5 com tratamento inteligente
-    para o limite de requisições por minuto (HTTP 429) da Open-Meteo.
+    Busca a serie diaria historica da reanalise ERA5 com tratamento inteligente
+    para o limite de requisicoes por minuto (HTTP 429) da Open-Meteo.
     """
     params = {
         "latitude": lat,
@@ -32,12 +43,12 @@ def fetch_daily_archive(lat: float, lon: float, start_date: str, end_date: str) 
     }
     headers = {"User-Agent": "CLIMAE-HistoricalSeeder/1.0"}
 
-    for attempt in range(1, 5):
+    for attempt in range(1, 6):
         try:
             res = requests.get(ARCHIVE_URL, params=params, headers=headers, timeout=45)
             if res.status_code == 429:
-                wait_sec = 62
-                print(f"    ⏳ Limite por minuto da API atingido (HTTP 429). Aguardando {wait_sec}s para liberar o próximo lote...")
+                wait_sec = 65
+                print(f"    [AVISO] Limite por minuto da API atingido (HTTP 429). Aguardando {wait_sec}s...", flush=True)
                 time.sleep(wait_sec)
                 continue
 
@@ -47,15 +58,16 @@ def fetch_daily_archive(lat: float, lon: float, start_date: str, end_date: str) 
                 return data["daily"]
         except Exception as exc:
             wait_sec = 10 * attempt
-            print(f"    [Tentativa {attempt}/4] Aviso na requisição ERA5: {exc}. Aguardando {wait_sec}s...")
+            print(f"    [Tentativa {attempt}/5] Aviso na requisicao ERA5: {exc}. Aguardando {wait_sec}s...", flush=True)
             time.sleep(wait_sec)
     return None
 
 
 def aggregate_and_save_region(region: Region, daily_data: dict) -> dict:
     """
-    Agrupa os dados diários em resumos mensais (year, month) e calcula
-    a Normal Climatológica (year = 0, month = 1..12) para a região.
+    Agrupa os dados diarios em resumos mensais (year, month) e calcula
+    a Normal Climatologica (year = 0, month = 1..12) para a regiao.
+    Evita duplicacoes limpando previamente os registros historicos da regiao.
     """
     dates = daily_data.get("time", [])
     t_mean = daily_data.get("temperature_2m_mean", [])
@@ -100,6 +112,7 @@ def aggregate_and_save_region(region: Region, daily_data: dict) -> dict:
         "max_winds": [],
     })
 
+    # Protecao estrita contra duplicacoes: remove qualquer registro anterior desta regiao
     MonthlyClimateSummary.query.filter_by(region_id=region.id).delete()
 
     for (year, month), vals in sorted(buckets.items()):
@@ -158,7 +171,7 @@ def aggregate_and_save_region(region: Region, daily_data: dict) -> dict:
             total_rain_mm=round(sum(c_acc["total_rains"]) / len(c_acc["total_rains"]), 1),
             rainy_days=int(round(sum(c_acc["rainy_days"]) / len(c_acc["rainy_days"]))),
             max_wind_kmh=round(sum(c_acc["max_winds"]) / len(c_acc["max_winds"]), 1) if c_acc["max_winds"] else None,
-            source="Normal Climatológica CLIMAE (Média ERA5 2000-2026)",
+            source="Normal Climatologica CLIMAE (Media ERA5 2000-2026)",
             updated_at=now_utc,
         )
         db.session.add(norm_summary)
@@ -172,35 +185,43 @@ def run_seed_monthly_climate(force_reseed: bool = False):
     app = create_app()
     with app.app_context():
         db.create_all()
-        regions = Region.query.all()
+        regions = Region.query.order_by(Region.municipality, Region.name).all()
         end_date = (datetime.now(timezone.utc) - timedelta(days=3)).strftime("%Y-%m-%d")
 
-        print("=" * 72)
-        print(f"📊 CLIMAE — CARGA HISTÓRICA MENSAL & CLIMATOLOGIA ({START_DATE} a {end_date})")
-        print("=" * 72)
+        missing_regions = [r for r in regions if MonthlyClimateSummary.query.filter_by(region_id=r.id).count() < 300]
+        
+        print("=" * 76, flush=True)
+        print(f"CLIMAE -- CARGA HISTORICA MENSAL & CLIMATOLOGIA ({START_DATE} a {end_date})", flush=True)
+        print(f"Total de regioes cadastradas: {len(regions)}", flush=True)
+        print(f"Regioes ja com historico: {len(regions) - len(missing_regions)}", flush=True)
+        print(f"Regioes a processar agora: {len(missing_regions) if not force_reseed else len(regions)}", flush=True)
+        print("=" * 76, flush=True)
 
+        processed = 0
         for idx, region in enumerate(regions, start=1):
             existing_count = MonthlyClimateSummary.query.filter_by(region_id=region.id).count()
             if existing_count >= 300 and not force_reseed:
-                print(f"[{idx}/{len(regions)}] ⏭️  {region.municipality} ({region.name}) já possui {existing_count} registros no banco. Pulando...")
+                print(f"[{idx}/{len(regions)}] [PULANDO] {region.municipality} ({region.name}) ja possui {existing_count} registros.", flush=True)
                 continue
 
-            print(f"[{idx}/{len(regions)}] Baixando série histórica ERA5: {region.municipality} ({region.name})...")
+            processed += 1
+            print(f"[{idx}/{len(regions)}] [BAIXANDO] ERA5: {region.municipality} ({region.name}) [{region.latitude}, {region.longitude}]...", flush=True)
             daily = fetch_daily_archive(region.latitude, region.longitude, START_DATE, end_date)
             if not daily:
-                print(f"  ❌ Falha ao obter dados para {region.municipality}")
+                print(f"  [ERRO] Falha ao obter dados para {region.municipality} ({region.name})", flush=True)
                 continue
 
             res = aggregate_and_save_region(region, daily)
-            print(f"  ✅ Salvos {res['months_saved']} meses históricos + {res['normals_saved']} médias climatológicas.")
+            print(f"  [OK] Salvos {res['months_saved']} meses historicos + {res['normals_saved']} medias climatologicas.", flush=True)
 
-            # Pausa preventiva de 8 segundos entre regiões pesadas (26 anos de dados cada)
-            time.sleep(8.0)
+            # Pausa preventiva de 5 segundos entre requisicoes para respeitar os limites de taxa da ERA5 Open-Meteo
+            time.sleep(5.0)
 
         total_in_db = MonthlyClimateSummary.query.count()
-        print("-" * 72)
-        print(f"🎉 Concluído! Total acumulado no banco: {total_in_db} registros de climatologia e histórico mensal.")
-        print("=" * 72)
+        print("-" * 76, flush=True)
+        print(f"Concluido com sucesso! {processed} regioes foram atualizadas.", flush=True)
+        print(f"Total acumulado no banco: {total_in_db} registros de historico mensal e climatologia.", flush=True)
+        print("=" * 76, flush=True)
 
 
 if __name__ == "__main__":
