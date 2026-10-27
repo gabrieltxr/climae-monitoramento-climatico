@@ -223,3 +223,27 @@ def test_prune_expired_data_service(client):
         remaining_fc = WeatherObservation.query.filter_by(region_id=reg.id, is_forecast=True).all()
         assert len(remaining_fc) == 1
         assert remaining_fc[0].precipitation_mm == 5.0
+
+
+def test_monthly_consolidation_service(client):
+    """Valida o cálculo de mês fechado e verificação de consolidação incremental."""
+    from app.services.monthly_consolidation import get_closed_month, is_month_consolidated, consolidate_closed_month
+    from datetime import datetime
+
+    # Teste de cálculo de data: em 01/11/2026, o mês fechado deve ser 10/2026
+    dt_nov = datetime(2026, 11, 1, 3, 0, tzinfo=timezone.utc)
+    y, m = get_closed_month(dt_nov)
+    assert y == 2026
+    assert m == 10
+
+    # Teste em 05/01/2027: o mês fechado deve ser 12/2026
+    dt_jan = datetime(2027, 1, 5, 12, 0, tzinfo=timezone.utc)
+    y_jan, m_jan = get_closed_month(dt_jan)
+    assert y_jan == 2026
+    assert m_jan == 12
+
+    with client.application.app_context():
+        # Executa consolidação no contexto atual
+        res = consolidate_closed_month()
+        assert "status" in res
+        assert res["status"] in ("already_consolidated", "success")

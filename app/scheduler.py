@@ -6,6 +6,7 @@ from app.collectors.open_meteo import collect_all_regions
 from app.collectors.traffic_collector import update_highway_conditions
 from app.services.alert_engine import run_alert_engine, evaluate_and_record_alerts
 from app.services.pruning_service import prune_expired_data
+from app.services.monthly_consolidation import consolidate_closed_month
 from app.models import WeatherObservation
 
 logger = logging.getLogger(__name__)
@@ -62,6 +63,18 @@ def init_scheduler(app):
                 logger.info("Executando rotina diária de purga de dados expirados...")
                 prune_expired_data()
 
+        def monthly_job():
+            with app.app_context():
+                logger.info("[SCHEDULER] Verificando consolidação do mês encerrado no histórico...")
+                consolidate_closed_month()
+
+        # Verifica ao ligar o servidor se o mês anterior já foi consolidado
+        with app.app_context():
+            try:
+                consolidate_closed_month()
+            except Exception as e:
+                logger.warning("[SCHEDULER] Aviso na verificação de consolidação mensal: %s", e)
+
         # Verifica ao ligar o servidor se os dados têm mais de 15 min; se sim, atualiza
         with app.app_context():
             try:
@@ -103,5 +116,14 @@ def init_scheduler(app):
                 id="database_pruning_job",
                 replace_existing=True,
             )
+            scheduler.add_job(
+                func=monthly_job,
+                trigger="cron",
+                day=1,
+                hour=3,
+                minute=0,
+                id="monthly_climate_consolidator",
+                replace_existing=True,
+            )
             scheduler.start()
-            logger.info("APScheduler iniciado (ciclo coleta: %d min | purga: 24h).", interval_minutes)
+            logger.info("APScheduler iniciado (coleta: %d min | purga: 24h | consolidação: mensal dia 1º).", interval_minutes)
