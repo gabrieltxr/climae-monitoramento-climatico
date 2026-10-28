@@ -167,3 +167,114 @@ class MonthlyClimateSummary(db.Model):
     __table_args__ = (
         db.UniqueConstraint('region_id', 'year', 'month', name='uq_region_year_month'),
     )
+
+
+class PowerOutageReport(db.Model):
+    """
+    Relatos colaborativos de falta de energia registrados pelos moradores (Crowdsourcing).
+    Utiliza hash anônimo de visitante para proteção anti-spam com cooldown de 30 minutos.
+    """
+    __tablename__ = 'power_outage_reports'
+
+    id = db.Column(db.Integer, primary_key=True)
+    region_id = db.Column(db.Integer, db.ForeignKey('regions.id'), nullable=False, index=True)
+    reported_at = db.Column(db.DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+    reporter_hash = db.Column(db.String(64), nullable=False, index=True)
+    comment = db.Column(db.String(140), nullable=True)
+    is_active = db.Column(db.Boolean, default=True, index=True)
+
+    __table_args__ = (
+        db.Index('ix_power_outage_region_time', 'region_id', 'reported_at'),
+    )
+
+
+class PowerRestorationReport(db.Model):
+    """
+    Relatos colaborativos de restabelecimento da energia elétrica ("A Luz Voltou").
+    Permite aos moradores confirmar o retorno do fornecimento elétrico, desativando
+    alertas pendentes de queda e sinalizando a normalização do serviço.
+    """
+    __tablename__ = 'power_restoration_reports'
+
+    id = db.Column(db.Integer, primary_key=True)
+    region_id = db.Column(db.Integer, db.ForeignKey('regions.id'), nullable=False, index=True)
+    restored_at = db.Column(db.DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+    reporter_hash = db.Column(db.String(64), nullable=False, index=True)
+    comment = db.Column(db.String(140), nullable=True)
+
+    __table_args__ = (
+        db.Index('ix_power_restoration_region_time', 'region_id', 'restored_at'),
+    )
+
+
+class PowerGridProbe(db.Model):
+    """
+    Sondas de conectividade virtual de rede (Nós multi-operadora / gateways públicos).
+    Permite avaliar a disponibilidade da infraestrutura elétrica através do monitoramento de nós de rede,
+    distinguindo quedas gerais de energia de simples rompimentos de fibra ótica de uma única operadora.
+    """
+    __tablename__ = 'power_grid_probes'
+
+    id = db.Column(db.Integer, primary_key=True)
+    region_id = db.Column(db.Integer, db.ForeignKey('regions.id'), nullable=False, index=True)
+    name = db.Column(db.String(100), nullable=False)          # Ex: "Nó FURG Carreiros", "Gateway Vivo Centro"
+    target_host = db.Column(db.String(120), nullable=False)   # IP ou hostname público
+    target_port = db.Column(db.Integer, default=80)           # Porta TCP para checagem não intrusiva (80, 443, 53)
+    provider_name = db.Column(db.String(50), nullable=False) # Ex: "Claro", "Vivo", "Oi", "RNP/Acadêmica"
+    is_up = db.Column(db.Boolean, default=True, index=True)
+    latency_ms = db.Column(db.Integer, nullable=True)
+    last_checked_at = db.Column(db.DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+
+    region = db.relationship('Region', backref='probes', lazy=True)
+
+    __table_args__ = (
+        db.Index('ix_probe_region_provider', 'region_id', 'provider_name'),
+    )
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "region_id": self.region_id,
+            "name": self.name,
+            "target_host": self.target_host,
+            "target_port": self.target_port,
+            "provider_name": self.provider_name,
+            "is_up": self.is_up,
+            "latency_ms": self.latency_ms,
+            "last_checked_at": self.last_checked_at.isoformat() if self.last_checked_at else None,
+        }
+
+
+class PowerUtilityBulletin(db.Model):
+    """
+    Boletins e comunicados oficiais emitidos pelas concessionárias (CEEE Grupo Equatorial, RGE) e Defesa Civil.
+    Permite informar a população sobre contingências, estimativas de restabelecimento e equipes em campo.
+    """
+    __tablename__ = 'power_utility_bulletins'
+
+    id = db.Column(db.Integer, primary_key=True)
+    municipality = db.Column(db.String(60), nullable=False, index=True)
+    region_id = db.Column(db.Integer, db.ForeignKey('regions.id'), nullable=True)
+    source = db.Column(db.String(80), default="CEEE Grupo Equatorial")
+    headline = db.Column(db.String(160), nullable=False)
+    body = db.Column(db.Text, nullable=False)
+    affected_customers = db.Column(db.Integer, nullable=True)
+    severity = db.Column(db.String(30), default="alerta")           # informativo, alerta, critico
+    status = db.Column(db.String(30), default="ativo", index=True)  # ativo, normalizado
+    published_at = db.Column(db.DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "municipality": self.municipality,
+            "region_id": self.region_id,
+            "source": self.source,
+            "headline": self.headline,
+            "body": self.body,
+            "affected_customers": self.affected_customers,
+            "severity": self.severity or "alerta",
+            "status": self.status or "ativo",
+            "published_at": self.published_at.isoformat() if self.published_at else None,
+        }
+
+

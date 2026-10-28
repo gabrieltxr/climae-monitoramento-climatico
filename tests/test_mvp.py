@@ -247,3 +247,184 @@ def test_monthly_consolidation_service(client):
         res = consolidate_closed_month()
         assert "status" in res
         assert res["status"] in ("already_consolidated", "success")
+
+
+def test_power_outage_crowdsourcing_api(client):
+    """Valida o módulo de monitoramento de energia elétrica via crowdsourcing e proteção anti-spam."""
+    with client.application.app_context():
+        reg = Region.query.first()
+        assert reg is not None
+
+        # 1. Status inicial deve ser estável
+        res = client.get(f"/api/power/status/{reg.id}")
+        assert res.status_code == 200
+        data = res.get_json()
+        assert data["status"] == "stable"
+        assert data["reports_30m"] == 0
+        assert data["user_can_report"] is True
+
+        # 2. Registra o 1º relato
+        res = client.post("/api/power/report", json={"region_id": reg.id, "comment": "Queda de luz no quarteirão"})
+        assert res.status_code == 200
+        rep_data = res.get_json()
+        assert rep_data["success"] is True
+        assert rep_data["reports_30m"] == 1
+        assert rep_data["status"] == "investigating"
+
+        # 3. Tentativa de relato duplicado do mesmo IP -> deve ser bloqueado com 429
+        res_dup = client.post("/api/power/report", json={"region_id": reg.id, "comment": "Tentativa repetida"})
+        assert res_dup.status_code == 429
+        dup_data = res_dup.get_json()
+        assert dup_data["success"] is False
+        assert "cooldown_remaining" in dup_data
+
+        # 4. Simula relatos de outros 2 IPs diferentes para atingir >= 3 relatos
+        client.post("/api/power/report", json={"region_id": reg.id}, headers={"X-Forwarded-For": "192.168.1.10"})
+        res_3 = client.post("/api/power/report", json={"region_id": reg.id}, headers={"X-Forwarded-For": "192.168.1.20"})
+        assert res_3.status_code == 200
+        data_3 = res_3.get_json()
+        assert data_3["reports_30m"] >= 3
+        assert data_3["status"] == "outage_reported"
+
+
+def test_power_restoration_crowdsourcing_api(client):
+    """Valida o restabelecimento colaborativo de energia elétrica ('A Luz Voltou')."""
+    with client.application.app_context():
+        reg = Region.query.first()
+        assert reg is not None
+
+        # 1. Cria um relato de falta de energia inicial
+        res_rep = client.post("/api/power/report", json={"region_id": reg.id, "comment": "Bairro sem energia"})
+        assert res_rep.status_code == 200
+        assert res_rep.get_json()["status"] == "investigating"
+
+        # 2. Confirma restabelecimento ("A Luz Voltou")
+        res_rest = client.post("/api/power/restore", json={"region_id": reg.id, "comment": "A luz retornou estável"})
+        assert res_rest.status_code == 200
+        rest_data = res_rest.get_json()
+        assert rest_data["success"] is True
+        assert rest_data["status"] == "restored"
+        assert "Energia Restabelecida" in rest_data["label"]
+        assert rest_data["reports_30m"] == 0
+        assert rest_data["restored_time"] is not None
+
+        # 3. Tentativa de confirmação repetida de retorno do mesmo IP -> rate limited (429)
+        res_dup_rest = client.post("/api/power/restore", json={"region_id": reg.id})
+        assert res_dup_rest.status_code == 429
+        assert "cooldown_remaining" in res_dup_rest.get_json()
+
+        # 4. Se houver nova queda de energia posterior (de outro IP), o status deve voltar para investigando/outage
+        res_new_outage = client.post(
+            "/api/power/report",
+            json={"region_id": reg.id, "comment": "Caiu novamente agora"},
+            headers={"X-Forwarded-For": "10.0.0.50"}
+        )
+        assert res_new_outage.status_code == 200
+        assert res_new_outage.get_json()["status"] == "investigating"
+
+
+def test_power_telemetry_probes_and_consensus(client):
+    """Valida a telemetria por sondas virtuais e o algoritmo de consenso multi-operadora da Fase 2."""
+    from app.models import PowerGridProbe
+    from app.services.power_service import seed_default_probes_if_empty, evaluate_region_probes, get_power_status
+
+    with client.application.app_context():
+        reg = Region.query.first()
+        assert reg is not None
+
+        # 1. Popula sondas padrão multi-operadora para a região de teste
+        seed_default_probes_if_empty()
+        probes = PowerGridProbe.query.filter_by(region_id=reg.id).all()
+        assert len(probes) >= 3
+
+        # 2. Avaliação inicial -> todas saudáveis (healthy)
+        eval_healthy = evaluate_region_probes(reg.id)
+        assert eval_healthy["status"] == "healthy"
+        assert eval_healthy["up_probes"] == len(probes)
+
+        # 3. Simula falha isolada de 1 operadora (ex: Claro cai, Vivo e RNP continuam up)
+        # Filtro Anti-Falso Positivo: NÃO deve acusar blackout elétrico
+        for p in probes:
+            if p.provider_name == "Claro":
+                p.is_up = False
+        db.session.commit()
+
+        eval_telecom = evaluate_region_probes(reg.id)
+        assert eval_telecom["status"] == "telecom_instability"
+        assert "Claro" in eval_telecom["providers_down"]
+
+        status_telecom = get_power_status(reg.id)
+        assert status_telecom["status"] == "stable"
+        assert "Instabilidade de dados" in status_telecom["label"]
+
+        # 4. Simula queda simultânea de TODAS as operadoras (Blackout Suspected)
+        for p in probes:
+            p.is_up = False
+        db.session.commit()
+
+        eval_blackout = evaluate_region_probes(reg.id)
+        assert eval_blackout["status"] == "blackout_suspected"
+
+        status_blackout = get_power_status(reg.id)
+        assert status_blackout["status"] == "blackout_suspected"
+        assert "Suspeita Técnica" in status_blackout["label"]
+
+        # 5. Correlaciona: Suspeita Técnica + 1 relato de morador -> eleva imediatamente para 'outage_reported'
+        res_corr = client.post(
+            "/api/power/report",
+            json={"region_id": reg.id, "comment": "Confirmando que caiu a energia no bairro"},
+            headers={"X-Forwarded-For": "172.16.0.99"}
+        )
+        assert res_corr.status_code == 200
+        corr_data = res_corr.get_json()
+        assert corr_data["status"] == "outage_reported"
+        assert "Sondas Offline" in corr_data["label"]
+
+        # 6. Validação das rotas de API da Fase 2
+        res_probes_api = client.get(f"/api/power/probes/{reg.id}")
+        assert res_probes_api.status_code == 200
+        assert "total_probes" in res_probes_api.get_json()
+
+
+def test_power_official_bulletins_api(client):
+    """Valida a ingestão, consulta e impacto de notas oficiais da concessionária e Defesa Civil (Fase 3)."""
+    with client.application.app_context():
+        reg = Region.query.first()  # municipality = "Rio Grande"
+        assert reg is not None
+
+        # 1. Cria um boletim oficial via POST /api/power/bulletins
+        bulletin_payload = {
+            "municipality": "Rio Grande",
+            "source": "CEEE Grupo Equatorial",
+            "headline": "Interrupção emergencial de alimentador na Zona Portuária",
+            "body": "Desligamento programado e emergencial para substituição de isoladores avariados por fortes rajadas de vento.",
+            "affected_customers": 2400,
+            "severity": "critico",
+            "status": "ativo"
+        }
+        res_post = client.post("/api/power/bulletins", json=bulletin_payload)
+        assert res_post.status_code == 201
+        post_data = res_post.get_json()
+        assert post_data["success"] is True
+        assert post_data["bulletin"]["affected_customers"] == 2400
+
+        # 2. Consulta listagem de boletins via GET /api/power/bulletins
+        res_get = client.get(f"/api/power/bulletins?municipality=Rio Grande")
+        assert res_get.status_code == 200
+        bulletins_list = res_get.get_json()
+        assert len(bulletins_list) >= 1
+        assert bulletins_list[0]["source"] == "CEEE Grupo Equatorial"
+
+        # 3. O status de energia da região deve refletir a confirmação oficial da concessionária
+        res_status = client.get(f"/api/power/status/{reg.id}")
+        assert res_status.status_code == 200
+        status_data = res_status.get_json()
+        assert status_data["status"] == "official_outage"
+        assert "Concessionária" in status_data["label"]
+        assert status_data["official_bulletin"] is not None
+        assert status_data["official_bulletin"]["affected_customers"] == 2400
+        assert status_data["official_bulletin"]["severity"] == "critico"
+
+
+
+

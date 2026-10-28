@@ -46,7 +46,7 @@ def init_scheduler(app):
     Inicia o agendador em segundo plano a cada 15 minutos (padrão)
     e avalia alertas automaticamente após cada coleta.
     """
-    if app.config.get("TESTING") or app.config.get("DISABLE_SCHEDULER"):
+    if app.config.get("TESTING") or app.config.get("DISABLE_SCHEDULER") or os.environ.get("DISABLE_SCHEDULER") == "1":
         return
 
     if scheduler.running:
@@ -74,6 +74,15 @@ def init_scheduler(app):
                 consolidate_closed_month()
             except Exception as e:
                 logger.warning("[SCHEDULER] Aviso na verificação de consolidação mensal: %s", e)
+
+        # Garante a inicialização das sondas de conectividade de rede
+        with app.app_context():
+            try:
+                from app.services.power_service import seed_default_probes_if_empty
+                seed_default_probes_if_empty()
+            except Exception as e:
+                logger.warning("[SCHEDULER] Aviso ao inicializar sondas de energia: %s", e)
+
 
         # Verifica ao ligar o servidor se os dados têm mais de 15 min; se sim, atualiza
         with app.app_context():

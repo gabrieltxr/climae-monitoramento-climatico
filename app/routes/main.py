@@ -416,3 +416,93 @@ def api_climate_history(region_id: int):
         "normals_annual": normals_list,
         "yearly_series_for_month": yearly_series,
     })
+
+
+# =========================================================================
+# MONITORAMENTO DE ENERGIA ELÉTRICA (CROWDSOURCING & SITUAÇÃO DA REDE)
+# =========================================================================
+
+@main_bp.route('/api/power/status/<int:region_id>')
+def api_power_status(region_id: int):
+    """Retorna o status atual de abastecimento elétrico da região e cooldown do usuário."""
+    from app.services.power_service import generate_reporter_hash, get_power_status
+    reporter_hash = generate_reporter_hash(request)
+    status_data = get_power_status(region_id, reporter_hash)
+    return jsonify(status_data)
+
+
+@main_bp.route('/api/power/report', methods=['POST'])
+def api_power_report():
+    """Registra um relato colaborativo de falta de energia com proteção anti-spam."""
+    from app.services.power_service import generate_reporter_hash, record_power_outage_report
+    data = request.get_json() or {}
+    region_id = data.get('region_id')
+    comment = data.get('comment')
+
+    if not region_id:
+        return jsonify({"success": False, "error": "ID da região é obrigatório."}), 400
+
+    reporter_hash = generate_reporter_hash(request)
+    result = record_power_outage_report(region_id, reporter_hash, comment)
+    status_code = 200 if result.get("success") else 429
+    return jsonify(result), status_code
+
+
+@main_bp.route('/api/power/restore', methods=['POST'])
+def api_power_restore():
+    """Registra uma confirmação colaborativa de retorno da luz ("A Luz Voltou") com proteção anti-spam."""
+    from app.services.power_service import generate_reporter_hash, record_power_restoration
+    data = request.get_json() or {}
+    region_id = data.get('region_id')
+    comment = data.get('comment')
+
+    if not region_id:
+        return jsonify({"success": False, "error": "ID da região é obrigatório."}), 400
+
+    reporter_hash = generate_reporter_hash(request)
+    result = record_power_restoration(region_id, reporter_hash, comment)
+    status_code = 200 if result.get("success") else 429
+    return jsonify(result), status_code
+
+
+@main_bp.route('/api/power/probes/<int:region_id>', methods=['GET'])
+def api_power_probes(region_id: int):
+    """Retorna a situação de telemetria das sondas virtuais de conectividade para a região."""
+    from app.services.power_service import evaluate_region_probes
+    telemetry = evaluate_region_probes(region_id)
+    return jsonify(telemetry)
+
+
+@main_bp.route('/api/power/probes/check/<int:region_id>', methods=['POST'])
+def api_power_check_probes(region_id: int):
+    """Executa checagem ativa em tempo real das sondas de conectividade da região."""
+    from app.services.power_service import run_probe_checks_for_region, get_power_status, generate_reporter_hash
+    run_probe_checks_for_region(region_id)
+    reporter_hash = generate_reporter_hash(request)
+    status = get_power_status(region_id, reporter_hash)
+    return jsonify(status)
+
+
+@main_bp.route('/api/power/bulletins', methods=['GET'])
+def api_power_bulletins():
+    """Retorna os comunicados e notas oficiais da concessionária e Defesa Civil."""
+    from app.services.power_service import get_utility_bulletins
+    municipality = request.args.get('municipality')
+    status = request.args.get('status')
+    limit = request.args.get('limit', 10, type=int)
+    bulletins = get_utility_bulletins(municipality=municipality, status=status, limit=limit)
+    return jsonify(bulletins)
+
+
+@main_bp.route('/api/power/bulletins', methods=['POST'])
+def api_power_create_bulletin():
+    """Registra uma nova nota ou comunicado oficial de contingência."""
+    from app.services.power_service import record_utility_bulletin
+    data = request.get_json() or {}
+    res = record_utility_bulletin(data)
+    status_code = 201 if res.get("success") else 400
+    return jsonify(res), status_code
+
+
+
+

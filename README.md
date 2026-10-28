@@ -29,12 +29,7 @@ Aplicação web modular em Python (Flask) desenvolvida para monitoramento meteor
   * **Revelação Progressiva (Zoom 12 a 14+):** Conforme o zoom se aproxima, bairros vizinhos (raio de 8 km a 22 km) revelam automaticamente seus nomes e rótulos de forma harmoniosa e sem colisão.
 * **Persistência de Região:** Sincronização em dupla camada (`localStorage` + cookie HTTP) para manter a seleção do usuário mesmo após recarregar a página.
 
-### 03. Histórico de Ocorrências Documentadas
-* Registro georreferenciado de eventos adversos (alagamentos, destelhamentos, quedas de árvores, ressacas).
-* Fontes integradas: Defesa Civil RS, S2iD, ANA, Praticagem da Barra, SANEP e PRF/Ecosul.
-* Filtros dinâmicos por município, bairro, nível de severidade e período.
-
-### 04. Índice de Risco Climático Dinâmico (`v0.2-dinâmico`)
+### 03. Índice de Risco Climático Dinâmico (`v0.2-dinâmico`)
 * Pontuação explicável de 0 a 100 pontos calculada por motor probabilístico ponderado.
 * **Pesos Analíticos:**
   * **Precipitação e Saturação (40% / máx. 40 pts):** Volume acumulado/previsto em 24h e probabilidade de tempestade.
@@ -42,11 +37,11 @@ Aplicação web modular em Python (Flask) desenvolvida para monitoramento meteor
   * **Vento e Tráfego Rodoviário (25% / máx. 25 pts):** Pico de rajadas de vento, umidade relativa crítica e retenções/bloqueios rodoviários ativos.
 * **Faixas de Severidade:** `0–24` Baixo | `25–49` Moderado | `50–74` Alto | `75–100` Muito Alto.
 
-### 05. Situação das Rodovias e Corredores de Tráfego
+### 04. Situação das Rodovias e Corredores de Tráfego
 * Monitoramento dos 7 eixos rodoviários estratégicos da região: **BR-116**, **BR-392**, **BR-471** e **ERS-265**.
 * Condições de pista, interdições ativas, pontos de alagamento e integração direta no cálculo do índice de risco local.
 
-### 06. Central de Alertas e Normalizações
+### 05. Central de Alertas e Normalizações
 * Geração automatizada de alertas operacionais para:
   * Chuva Intensa ($\ge$ 25 mm/24h)
   * Vendaval e Rajadas Fortes ($\ge$ 55 km/h)
@@ -54,11 +49,16 @@ Aplicação web modular em Python (Flask) desenvolvida para monitoramento meteor
 * **Alertas de Recuperação:** Registro formal de normalização quando os parâmetros atmosféricos retornam a níveis seguros.
 * **Paginação Server-Side:** Navegação fluida e eficiente na tabela de eventos com controle de deduplicação diária (`dedup_key`).
 
-### 07. Histórico Climático Mensal & Normais Climatológicas (ERA5)
+### 06. Histórico Climático Mensal & Normais Climatológicas (ERA5)
 * **100% de Cobertura das 56 Regiões:** Mais de **18.700 registros consolidados**.
 * **Série Histórica Contínua:** Dados mensais de **2000 a 2026** obtidos via reanálise global ERA5 (Open-Meteo Archive).
 * **Normais Climatológicas:** Médias históricas dos 12 meses do ano para comparação de desvios e anomalias de temperatura (°C) e precipitação (mm).
 * **Projeção Sazonal:** Diagnóstico automático comparando o mês corrente com o padrão histórico da localidade.
+
+### 07. Histórico de Eventos e Ocorrências Documentadas
+* Registro georreferenciado de eventos adversos (alagamentos, destelhamentos, quedas de árvores, ressacas).
+* Fontes integradas: Defesa Civil RS, S2iD, ANA, Praticagem da Barra, SANEP e PRF/Ecosul.
+* Filtros dinâmicos por município, bairro, nível de severidade e período.
 
 ---
 
