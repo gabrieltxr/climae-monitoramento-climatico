@@ -2739,17 +2739,6 @@
                 `;
                 tbody.appendChild(tr);
 
-                if (item.latitude && item.longitude) {
-                    const marker = L.circleMarker([item.latitude + 0.012, item.longitude + 0.012], {
-                        radius: 5.5,
-                        fillColor: "#c084fc",
-                        color: "#ffffff",
-                        weight: 1.2,
-                        fillOpacity: 0.9
-                    });
-                    marker.bindPopup(`<strong>${item.event_type}</strong><br>${item.municipality} (${item.region_name})<br>${formatBRT(item.occurred_at)}`);
-                    occurrenceLayerGroup.addLayer(marker);
-                }
             });
         }
 
