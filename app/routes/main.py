@@ -58,14 +58,8 @@ def api_region_weather(region_id):
         .limit(24)
         .all()
     )
-    if not forecasts:
-        forecasts = (
-            WeatherObservation.query
-            .filter_by(region_id=region.id, is_forecast=True)
-            .order_by(WeatherObservation.observed_at.asc())
-            .limit(24)
-            .all()
-        )
+    # Sem fallback para previsões vencidas: se não houver horários futuros,
+    # a previsão retorna vazia em vez de exibir dados passados como "próximas 24h".
 
     return jsonify({
         "region": region.to_dict(),
@@ -119,14 +113,6 @@ def get_weather_summary():
             .limit(24)
             .all()
         )
-        if not forecasts:
-            forecasts = (
-                WeatherObservation.query
-                .filter_by(region_id=r.id, is_forecast=True)
-                .order_by(WeatherObservation.observed_at.asc())
-                .limit(24)
-                .all()
-            )
         rain_24h = sum((f.precipitation_mm or 0.0) for f in forecasts)
         fc = forecasts[0] if forecasts else None
         risk = (

@@ -428,3 +428,42 @@ def test_power_official_bulletins_api(client):
 
 
 
+
+
+def test_risk_ignores_expired_forecasts(client):
+    """Previsões vencidas (horários passados ainda não purgados) não entram no risco nem nas APIs."""
+    from datetime import timedelta
+    with client.application.app_context():
+        reg = Region.query.first()
+        hour = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0)
+        for h in range(1, 25):
+            # Passado: chuva forte (deve ser ignorada) | Futuro: tempo seco
+            db.session.add(WeatherObservation(region_id=reg.id, observed_at=hour - timedelta(hours=h),
+                                              is_forecast=True, precipitation_mm=3.0, wind_speed=10.0, source="t"))
+            db.session.add(WeatherObservation(region_id=reg.id, observed_at=hour + timedelta(hours=h),
+                                              is_forecast=True, precipitation_mm=0.0, wind_speed=10.0, source="t"))
+        db.session.add(WeatherObservation(region_id=reg.id, observed_at=hour, is_forecast=False,
+                                          precipitation_mm=0.0, wind_speed=5.0, humidity_percent=60.0, source="t"))
+        db.session.commit()
+
+        assessment = calculate_region_risk(reg)
+        assert assessment.factors["precipitacao_40pct"]["acumulado_previsto_24h_mm"] == 0.0
+        assert assessment.score < 25
+
+    summary = client.get("/api/weather-summary?format=list").get_json()
+    assert summary[0]["rain_next_24h_mm"] == 0.0
+
+
+def test_weather_api_has_no_stale_forecast_fallback(client):
+    """Sem horários futuros, a previsão de 24h deve vir vazia (sem exibir dados passados)."""
+    from datetime import timedelta
+    with client.application.app_context():
+        reg = Region.query.first()
+        past = datetime.now(timezone.utc) - timedelta(hours=5)
+        db.session.add(WeatherObservation(region_id=reg.id, observed_at=past, is_forecast=True,
+                                          precipitation_mm=10.0, source="t"))
+        db.session.commit()
+        region_id = reg.id
+
+    data = client.get(f"/api/weather/{region_id}").get_json()
+    assert data["forecast_24h"] == []
