@@ -938,3 +938,40 @@ def test_backup_sqlite_database_refuses_missing_or_existing(tmp_path):
     assert first.endswith("x.backup-20261118-120000.db")
     with pytest.raises(FileExistsError):
         backup_sqlite_database(str(src), now=when)
+
+
+# ------------------------- Carga histórica (item 4d) -------------------------
+
+def test_seed_end_date_skips_open_month_and_era5_lag():
+    """A carga termina no último mês fechado com ERA5 completo, nunca no mês em andamento."""
+    from scripts.seed_monthly_climate import get_seed_end_date
+    # 24/10: outubro em andamento -> setembro é o último mês completo.
+    assert get_seed_end_date(datetime(2026, 10, 24, 18, 0, tzinfo=timezone.utc)) == "2026-09-30"
+    # 03/11: outubro fechado, mas ainda dentro do atraso do ERA5.
+    assert get_seed_end_date(datetime(2026, 11, 3, 3, 0, tzinfo=timezone.utc)) == "2026-09-30"
+    # 06/11: ERA5 de outubro publicado.
+    assert get_seed_end_date(datetime(2026, 11, 6, 3, 0, tzinfo=timezone.utc)) == "2026-10-31"
+    # Virada do ano.
+    assert get_seed_end_date(datetime(2027, 1, 2, 3, 0, tzinfo=timezone.utc)) == "2026-11-30"
+
+
+def test_seed_does_not_save_partial_month(client):
+    """Mês com dias faltando na série (fim do ERA5 ou mês em andamento) não é gravado."""
+    from app.models import Region, MonthlyClimateSummary
+    from scripts.seed_monthly_climate import aggregate_and_save_region
+    dates = [f"2026-09-{d:02d}" for d in range(1, 31)] + [f"2026-10-{d:02d}" for d in range(1, 22)]
+    n = len(dates)
+    daily = {
+        "time": dates,
+        "temperature_2m_mean": [18.0] * n,
+        "temperature_2m_max": [24.0] * n,
+        "temperature_2m_min": [12.0] * n,
+        "precipitation_sum": [2.0] * n,
+        "wind_speed_10m_max": [30.0] * n,
+    }
+    with client.application.app_context():
+        region = Region.query.first()
+        aggregate_and_save_region(region, daily)
+        saved = {(r.year, r.month) for r in MonthlyClimateSummary.query.filter(
+            MonthlyClimateSummary.region_id == region.id, MonthlyClimateSummary.year > 0)}
+        assert saved == {(2026, 9)}

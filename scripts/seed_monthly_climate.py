@@ -1,8 +1,9 @@
+import calendar
 import os
 import sys
 import time
 from collections import defaultdict
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 import requests
 
 if sys.stdout.encoding and sys.stdout.encoding.lower() != 'utf-8':
@@ -20,9 +21,22 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from app import create_app
 from app.models import db, Region, MonthlyClimateSummary
+from app.services.monthly_consolidation import get_closed_month, is_era5_available
 
 ARCHIVE_URL = "https://archive-api.open-meteo.com/v1/archive"
 START_DATE = "2000-01-01"
+
+
+def get_seed_end_date(reference_date: datetime = None) -> str:
+    """
+    Último dia do mês fechado mais recente com ERA5 já publicado por completo.
+    A carga nunca grava o mês em andamento nem um mês ainda dentro do atraso do ERA5:
+    esses meses ficariam parciais e, contando como consolidados, nunca seriam corrigidos.
+    """
+    year, month = get_closed_month(reference_date)
+    if not is_era5_available(year, month, reference_date):
+        year, month = (year, month - 1) if month > 1 else (year - 1, 12)
+    return f"{year}-{month:02d}-{calendar.monthrange(year, month)[1]:02d}"
 
 
 def fetch_daily_archive(lat: float, lon: float, start_date: str, end_date: str) -> dict | None:
@@ -116,7 +130,10 @@ def aggregate_and_save_region(region: Region, daily_data: dict) -> dict:
     MonthlyClimateSummary.query.filter_by(region_id=region.id).delete()
 
     for (year, month), vals in sorted(buckets.items()):
-        if not vals["t_mean"] and not vals["rain"]:
+        # Mesmo critério da consolidação mensal: só grava meses com chuva e temperatura
+        # média em todos os dias. Um mês parcial contaria como consolidado e nunca seria refeito.
+        days_in_month = calendar.monthrange(year, month)[1]
+        if len(vals["t_mean"]) < days_in_month or len(vals["rain"]) < days_in_month:
             continue
 
         avg_t = round(sum(vals["t_mean"]) / len(vals["t_mean"]), 1) if vals["t_mean"] else None
@@ -186,7 +203,7 @@ def run_seed_monthly_climate(force_reseed: bool = False):
     with app.app_context():
         db.create_all()
         regions = Region.query.order_by(Region.municipality, Region.name).all()
-        end_date = (datetime.now(timezone.utc) - timedelta(days=3)).strftime("%Y-%m-%d")
+        end_date = get_seed_end_date()
 
         missing_regions = [r for r in regions if MonthlyClimateSummary.query.filter_by(region_id=r.id).count() < 300]
         
