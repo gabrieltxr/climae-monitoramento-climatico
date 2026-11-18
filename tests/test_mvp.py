@@ -664,3 +664,59 @@ def test_occurrences_invalid_dates_return_400(client):
     assert client.get("/api/occurrences?start_date=2026-13-45").status_code == 400
     assert client.get("/api/occurrences?end_date=ontem").status_code == 400
     assert client.get("/api/occurrences?start_date=2026-01-01&end_date=2026-01-31").status_code == 200
+
+
+def _stub_scheduler_startup_io(monkeypatch):
+    """Evita rede nas rotinas que o agendador executa ao iniciar."""
+    import app.scheduler as sched_mod
+    import app.services.power_service as power_mod
+    monkeypatch.delenv("DISABLE_SCHEDULER", raising=False)
+    monkeypatch.delenv("WERKZEUG_RUN_MAIN", raising=False)
+    monkeypatch.setattr(sched_mod, "run_scheduled_cycle", lambda app: None)
+    monkeypatch.setattr(sched_mod, "consolidate_closed_month", lambda *a, **k: None)
+    monkeypatch.setattr(power_mod, "seed_default_probes_if_empty", lambda: None)
+
+
+def test_run_scheduler_script_starts_even_with_debug_env(monkeypatch):
+    """O processo dedicado (uso com WSGI) inicia o agendador mesmo com FLASK_DEBUG=1 no ambiente."""
+    from app.scheduler import scheduler
+    from scripts import run_scheduler
+    _stub_scheduler_startup_io(monkeypatch)
+    monkeypatch.setenv("FLASK_DEBUG", "1")
+    app = create_app(_NoTestingConfig)
+    app.debug = True
+    try:
+        assert run_scheduler.start(app) is True
+        job_ids = {job.id for job in scheduler.get_jobs()}
+        assert {"open_meteo_collector", "database_pruning_job", "monthly_climate_consolidator"} <= job_ids
+    finally:
+        if scheduler.running:
+            scheduler.shutdown(wait=False)
+
+
+def test_run_scheduler_script_shuts_down_on_stop(monkeypatch):
+    """Ao receber o pedido de parada (Ctrl+C/SIGTERM), o script encerra o agendador."""
+    import signal
+    import threading
+    from app.scheduler import scheduler
+    from scripts import run_scheduler
+    _stub_scheduler_startup_io(monkeypatch)
+    monkeypatch.setattr(signal, "signal", lambda *a, **k: None)
+    stop = threading.Event()
+    stop.set()
+    try:
+        assert run_scheduler.main(create_app(_NoTestingConfig), stop_event=stop) == 0
+        assert not scheduler.running
+    finally:
+        if scheduler.running:
+            scheduler.shutdown(wait=False)
+
+
+def test_run_scheduler_script_respects_disable_flag(monkeypatch):
+    """Com DISABLE_SCHEDULER=1 o script não sobe nada e sai com código 1."""
+    from app.scheduler import scheduler
+    from scripts import run_scheduler
+    _stub_scheduler_startup_io(monkeypatch)
+    monkeypatch.setenv("DISABLE_SCHEDULER", "1")
+    assert run_scheduler.main(create_app(_NoTestingConfig)) == 1
+    assert not scheduler.running

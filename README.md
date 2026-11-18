@@ -116,6 +116,11 @@ python run.py
 
 Acesse a aplicação no navegador em: **`http://127.0.0.1:5000`**
 
+> **Servindo via WSGI (gunicorn, waitress etc.):** o agendador de coleta só sobe junto
+> com a web em `python run.py`. Ao servir `run:app` por um servidor WSGI, rode o
+> agendador em **um único** processo separado com `python scripts/run_scheduler.py`
+> (e não rode `run.py` ao mesmo tempo, para não duplicar as coletas).
+
 ---
 
 ## 4. Scripts e Utilitários de Manutenção
@@ -123,6 +128,7 @@ Acesse a aplicação no navegador em: **`http://127.0.0.1:5000`**
 * `scripts/seed_regions.py`: Cadastra ou atualiza as 56 regiões no banco de dados SQLite.
 * `scripts/seed_occurrences.py`: Insere a base histórica de ocorrências documentadas.
 * `scripts/collect_weather.py`: Executa um ciclo manual de coleta meteorológica e avaliação de risco.
+* `scripts/run_scheduler.py`: Executa só o agendador (coleta, purga e consolidação mensal) em processo próprio, para uso com servidor WSGI.
 * `scripts/sync_climate_history.py`: Audita a integridade do banco e sincroniza a climatologia ERA5 das 56 regiões.
 * `scripts/seed_monthly_climate.py`: Rotina avançada de carga direta da API ERA5 Open-Meteo.
 * `scripts/cleanup_all_regions.py`: Limpeza e reestruturação atômica das regiões.
