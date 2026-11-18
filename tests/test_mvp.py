@@ -467,3 +467,28 @@ def test_weather_api_has_no_stale_forecast_fallback(client):
 
     data = client.get(f"/api/weather/{region_id}").get_json()
     assert data["forecast_24h"] == []
+
+
+class _NoTestingConfig:
+    SQLALCHEMY_DATABASE_URI = "sqlite:///:memory:"
+    SQLALCHEMY_TRACK_MODIFICATIONS = False
+
+
+def test_create_app_does_not_start_scheduler(monkeypatch):
+    """create_app() é usado por scripts e pelo preflight: não pode iniciar o agendador."""
+    from app.scheduler import scheduler
+    monkeypatch.delenv("DISABLE_SCHEDULER", raising=False)
+    monkeypatch.delenv("WERKZEUG_RUN_MAIN", raising=False)
+    create_app(_NoTestingConfig)
+    assert not scheduler.running
+
+
+def test_scheduler_skips_reloader_parent_process(monkeypatch):
+    """Com debug/reloader ativo, o processo pai (sem WERKZEUG_RUN_MAIN) não inicia o agendador."""
+    from app.scheduler import scheduler, init_scheduler
+    monkeypatch.delenv("DISABLE_SCHEDULER", raising=False)
+    monkeypatch.delenv("WERKZEUG_RUN_MAIN", raising=False)
+    app = create_app(_NoTestingConfig)
+    app.debug = True
+    init_scheduler(app)
+    assert not scheduler.running
