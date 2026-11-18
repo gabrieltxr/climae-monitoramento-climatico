@@ -720,3 +720,39 @@ def test_run_scheduler_script_respects_disable_flag(monkeypatch):
     monkeypatch.setenv("DISABLE_SCHEDULER", "1")
     assert run_scheduler.main(create_app(_NoTestingConfig)) == 1
     assert not scheduler.running
+
+
+def test_wind_direction_weighted_by_speed():
+    """Direção média ponderada pela velocidade: vento fraco quase não puxa a média."""
+    from app.collectors.open_meteo import _circular_mean_deg
+    # Norte a 40 km/h + leste a 2 km/h: fica praticamente norte (sem peso daria 45°).
+    assert _circular_mean_deg([0, 90], [40, 2]) == 2.9
+    # Opostos com velocidades bem diferentes: vence o vento forte.
+    assert _circular_mean_deg([90, 270], [30, 2]) == 90.0
+    assert _circular_mean_deg([90, 270], [2, 30]) == 270.0
+    # Velocidade faltando ou tudo calmo: volta à média sem peso.
+    assert _circular_mean_deg([0, 90], [40, None]) == 45.0
+    assert _circular_mean_deg([0, 90], [0, 0]) == 45.0
+
+
+def test_wind_direction_near_opposite_keeps_main_model():
+    """Direções quase opostas (concordância baixa) mantêm o modelo principal em vez de um ângulo arbitrário."""
+    from app.collectors.open_meteo import _circular_mean_deg
+    assert _circular_mean_deg([90, 268]) == 90.0
+    assert _circular_mean_deg([90, 268], [20, 20]) == 90.0
+
+
+def test_wind_direction_pairs_speed_with_same_model():
+    """Direção e velocidade são casadas pelo modelo, mesmo quando um modelo não traz direção."""
+    from app.collectors.open_meteo import _aligned_model_series, _wind_direction_at_index
+    hourly = {
+        "wind_speed_10m": [10],                 # modelo sem direção correspondente
+        "wind_direction_10m_best_match": [0],
+        "wind_speed_10m_best_match": [40],
+        "wind_direction_10m_ecmwf_ifs025": [90],
+        "wind_speed_10m_ecmwf_ifs025": [2],
+    }
+    dirs = _aligned_model_series(hourly, "wind_direction_10m")
+    speeds = _aligned_model_series(hourly, "wind_speed_10m")
+    assert _wind_direction_at_index(dirs, speeds, 0) == 2.9
+    assert _wind_direction_at_index(dirs, speeds, 5) is None
