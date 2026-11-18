@@ -1,4 +1,5 @@
 import logging
+import math
 import time
 from datetime import datetime, timezone
 import requests
@@ -79,6 +80,35 @@ def _avg_model_at_index(series_list: list[list], idx: int) -> float | None:
     return round(sum(vals) / len(vals), 1) if vals else None
 
 
+def _circular_mean_deg(values: list[float]) -> float | None:
+    """
+    Média circular de ângulos em graus (0-360), via soma de vetores unitários.
+    A média aritmética simples falha perto do norte: (350° + 10°) / 2 = 180° (sul),
+    quando o correto é 0° (norte). Se os vetores se anulam (direções opostas),
+    a direção é indefinida e o primeiro valor (modelo principal) é mantido.
+    """
+    vals = [float(v) for v in values if v is not None]
+    if not vals:
+        return None
+    sin_sum = sum(math.sin(math.radians(v)) for v in vals)
+    cos_sum = sum(math.cos(math.radians(v)) for v in vals)
+    if math.hypot(sin_sum, cos_sum) < 1e-6:
+        return round(vals[0] % 360.0, 1)
+    mean = math.degrees(math.atan2(sin_sum, cos_sum)) % 360.0
+    return round(mean, 1) % 360.0
+
+
+def _circular_mean_at_index(series_list: list[list], idx: int) -> float | None:
+    return _circular_mean_deg([s[idx] for s in series_list if idx < len(s)])
+
+
+def _extract_current_direction(current: dict, base_key: str) -> float | None:
+    return _circular_mean_deg([
+        current.get(f"{base_key}{suffix}")
+        for suffix in ["", "_best_match", "_ecmwf_ifs025", "_gfs_seamless"]
+    ])
+
+
 def _consensus_rain_at_index(series_list: list[list], idx: int, wmo_code: int | None = None) -> float:
     vals = [
         float(s[idx]) for s in series_list
@@ -143,7 +173,7 @@ def save_region_weather(region: Region, data: dict) -> dict:
         temp_final = _extract_current_value(current, "temperature_2m", "avg")
         hum_final = _extract_current_value(current, "relative_humidity_2m", "avg")
         wind_final = _extract_current_value(current, "wind_speed_10m", "avg")
-        wind_dir_final = _extract_current_value(current, "wind_direction_10m", "avg")
+        wind_dir_final = _extract_current_direction(current, "wind_direction_10m")
         wmo_code = _extract_current_value(current, "weather_code", "max")
 
         cur_precip = _extract_current_value(current, "precipitation", "max") or 0.0
@@ -158,7 +188,7 @@ def save_region_weather(region: Region, data: dict) -> dict:
             )
             rain_final = max(rain_final, hourly_consensus_rain)
             if wind_dir_final is None:
-                wind_dir_final = _avg_model_at_index(wind_dir_series, idx_now)
+                wind_dir_final = _circular_mean_at_index(wind_dir_series, idx_now)
 
         if rain_final == 0.0 and wmo_code is not None and int(wmo_code) in WMO_RAIN_CODES:
             rain_final = 0.2
@@ -203,7 +233,7 @@ def save_region_weather(region: Region, data: dict) -> dict:
         fc_temp = _avg_model_at_index(temp_series, i)
         fc_hum = _avg_model_at_index(hum_series, i)
         fc_wind = _avg_model_at_index(wind_series, i)
-        fc_wind_dir = _avg_model_at_index(wind_dir_series, i)
+        fc_wind_dir = _circular_mean_at_index(wind_dir_series, i)
         fc_rain = _consensus_rain_at_index(precip_series, i)
         fc_prob = _avg_model_at_index(prob_series, i) or 0.0
 

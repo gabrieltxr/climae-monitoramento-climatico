@@ -492,3 +492,42 @@ def test_scheduler_skips_reloader_parent_process(monkeypatch):
     app.debug = True
     init_scheduler(app)
     assert not scheduler.running
+
+
+def test_circular_mean_wind_direction():
+    """Direção do vento usa média circular: 350° e 10° = 0° (norte), não 180° (sul)."""
+    from app.collectors.open_meteo import _circular_mean_deg
+    assert _circular_mean_deg([350, 10]) == 0.0
+    assert _circular_mean_deg([340, 350, 20]) == 356.5
+    assert _circular_mean_deg([80, 100]) == 90.0
+    assert _circular_mean_deg([270, None, 270]) == 270.0
+    assert _circular_mean_deg([None, None]) is None
+    assert _circular_mean_deg([90, 270]) == 90.0  # opostos: mantém o modelo principal
+
+
+def test_collector_saves_circular_wind_direction(client):
+    """O coletor grava a direção consensual correta nas séries observada e prevista."""
+    from datetime import timedelta
+    from app.collectors.open_meteo import save_region_weather
+    hour = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0)
+    times = [(hour + timedelta(hours=h)).strftime("%Y-%m-%dT%H:00") for h in range(3)]
+    hourly = {"time": times}
+    for suffix, direction in [("_best_match", 350), ("_ecmwf_ifs025", 10), ("_gfs_seamless", 0)]:
+        hourly[f"wind_direction_10m{suffix}"] = [direction] * 3
+        hourly[f"wind_speed_10m{suffix}"] = [20.0] * 3
+        hourly[f"temperature_2m{suffix}"] = [18.0] * 3
+    current = {
+        "time": times[0],
+        "wind_direction_10m_best_match": 355,
+        "wind_direction_10m_ecmwf_ifs025": 5,
+        "wind_speed_10m_best_match": 20.0,
+    }
+
+    with client.application.app_context():
+        reg = Region.query.first()
+        save_region_weather(reg, {"current": current, "hourly": hourly})
+        obs = WeatherObservation.query.filter_by(region_id=reg.id, is_forecast=False).first()
+        fcs = WeatherObservation.query.filter_by(region_id=reg.id, is_forecast=True).all()
+        assert obs.wind_direction == 0.0
+        assert len(fcs) == 3
+        assert all(f.wind_direction == 0.0 for f in fcs)
