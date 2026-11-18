@@ -225,8 +225,9 @@ def test_prune_expired_data_service(client):
         assert remaining_fc[0].precipitation_mm == 5.0
 
 
-def test_monthly_consolidation_service(client):
+def test_monthly_consolidation_service(client, monkeypatch):
     """Valida o cálculo de mês fechado e verificação de consolidação incremental."""
+    from app.services import monthly_consolidation as mc
     from app.services.monthly_consolidation import get_closed_month, is_month_consolidated, consolidate_closed_month
     from datetime import datetime
 
@@ -242,11 +243,19 @@ def test_monthly_consolidation_service(client):
     assert y_jan == 2026
     assert m_jan == 12
 
+    # API ERA5 simulada: o teste não depende de rede nem da data em que roda.
+    monkeypatch.setattr(mc, "fetch_month_daily", _fake_era5(incomplete_months=()))
+    ref = datetime(2026, 11, 7, 3, 0, tzinfo=timezone.utc)
     with client.application.app_context():
-        # Executa consolidação no contexto atual
-        res = consolidate_closed_month()
-        assert "status" in res
-        assert res["status"] in ("already_consolidated", "success", "awaiting_era5")
+        res = consolidate_closed_month(reference_date=ref)
+        assert res["status"] == "success"
+        assert (res["year"], res["month"]) == (2026, 10)
+        assert is_month_consolidated(2026, 10)
+
+        # Segunda verificação no mesmo dia: nada a fazer.
+        res = consolidate_closed_month(reference_date=ref)
+        assert res["status"] == "already_consolidated"
+        assert res["updated_regions"] == 0
 
 
 def test_power_outage_crowdsourcing_api(client):
