@@ -1,12 +1,13 @@
+import os
 import sqlite3
 from flask import Flask
+from werkzeug.middleware.proxy_fix import ProxyFix
 from flask_migrate import Migrate
 from sqlalchemy import event
 from sqlalchemy.engine import Engine
 from app.config import Config
 from app.models import db
 from app.routes.main import main_bp
-from app.scheduler import init_scheduler
 
 migrate = Migrate()
 
@@ -36,7 +37,12 @@ def create_app(config_class=Config):
 
     app.register_blueprint(main_bp)
 
-    # Inicia o agendamento automático de coletas meteorológicas
-    init_scheduler(app)
+    # Só confia em X-Forwarded-For quando há proxy reverso declarado (ex.: Nginx = 1).
+    trusted_proxies = int(os.getenv("TRUSTED_PROXY_COUNT", "0") or 0)
+    if trusted_proxies > 0:
+        app.wsgi_app = ProxyFix(app.wsgi_app, x_for=trusted_proxies)
+
+    # O agendador NÃO é iniciado aqui: create_app() também é usado por scripts,
+    # testes e pelo preflight. Ele é iniciado explicitamente em run.py.
 
     return app

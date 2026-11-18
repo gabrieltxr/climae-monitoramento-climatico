@@ -7,11 +7,12 @@ elétrico por localidade.
 """
 
 import hashlib
+import hmac
 import math
 import socket
 import time
 from datetime import datetime, timedelta, timezone
-from flask import Request
+from flask import Request, current_app
 from app.models import (
     db,
     Region,
@@ -33,18 +34,18 @@ def make_aware_utc(dt: datetime) -> datetime:
 
 def generate_reporter_hash(request: Request) -> str:
     """
-    Gera um hash anônimo (SHA-256) baseado no IP do cliente e no User-Agent.
+    Gera um hash anônimo (HMAC-SHA-256) baseado no IP do cliente e no User-Agent.
     Não armazena o IP em texto claro, garantindo privacidade e conformidade com a LGPD.
-    """
-    forwarded_for = request.headers.get("X-Forwarded-For")
-    if forwarded_for:
-        client_ip = forwarded_for.split(",")[0].strip()
-    else:
-        client_ip = request.remote_addr or "127.0.0.1"
 
+    O IP vem de request.remote_addr (a conexão real). O header X-Forwarded-For não é
+    lido aqui, pois qualquer cliente pode forjá-lo para burlar o cooldown. Atrás de
+    um proxy reverso confiável, configure TRUSTED_PROXY_COUNT (ProxyFix em create_app).
+    """
+    client_ip = request.remote_addr or "127.0.0.1"
     user_agent = request.headers.get("User-Agent", "Unknown-Agent")
-    raw_str = f"climae-salt-power:{client_ip}:{user_agent}"
-    return hashlib.sha256(raw_str.encode("utf-8")).hexdigest()
+    secret = str(current_app.config.get("SECRET_KEY") or "climae-salt-power").encode("utf-8")
+    raw_str = f"power:{client_ip}:{user_agent}".encode("utf-8")
+    return hmac.new(secret, raw_str, hashlib.sha256).hexdigest()
 
 
 def check_report_cooldown(region_id: int, reporter_hash: str, cooldown_minutes: int = 30) -> tuple[bool, int]:

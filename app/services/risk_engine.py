@@ -32,6 +32,7 @@ def calculate_region_risk(region: Region) -> RiskAssessment:
     - 25% Condições complementares (Vento efetivo > 25km/h, saturação atmosférica, trânsito)
     """
     now_utc = datetime.now(timezone.utc)
+    current_hour_floor = now_utc.replace(minute=0, second=0, microsecond=0)
 
     # 1. Buscar dados meteorológicos atuais e previsão de 24h
     current_obs = (
@@ -40,9 +41,12 @@ def calculate_region_risk(region: Region) -> RiskAssessment:
         .order_by(WeatherObservation.observed_at.desc())
         .first()
     )
+    # Apenas horários a partir da hora corrente: previsões vencidas (ainda não purgadas)
+    # não podem ser contabilizadas como chuva/vento "previstos".
     forecasts_24h = (
         WeatherObservation.query
         .filter_by(region_id=region.id, is_forecast=True)
+        .filter(WeatherObservation.observed_at >= current_hour_floor)
         .order_by(WeatherObservation.observed_at.asc())
         .limit(24)
         .all()

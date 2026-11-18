@@ -246,7 +246,7 @@ def test_monthly_consolidation_service(client):
         # Executa consolidação no contexto atual
         res = consolidate_closed_month()
         assert "status" in res
-        assert res["status"] in ("already_consolidated", "success")
+        assert res["status"] in ("already_consolidated", "success", "awaiting_era5")
 
 
 def test_power_outage_crowdsourcing_api(client):
@@ -279,8 +279,8 @@ def test_power_outage_crowdsourcing_api(client):
         assert "cooldown_remaining" in dup_data
 
         # 4. Simula relatos de outros 2 IPs diferentes para atingir >= 3 relatos
-        client.post("/api/power/report", json={"region_id": reg.id}, headers={"X-Forwarded-For": "192.168.1.10"})
-        res_3 = client.post("/api/power/report", json={"region_id": reg.id}, headers={"X-Forwarded-For": "192.168.1.20"})
+        client.post("/api/power/report", json={"region_id": reg.id}, environ_base={"REMOTE_ADDR": "192.168.1.10"})
+        res_3 = client.post("/api/power/report", json={"region_id": reg.id}, environ_base={"REMOTE_ADDR": "192.168.1.20"})
         assert res_3.status_code == 200
         data_3 = res_3.get_json()
         assert data_3["reports_30m"] >= 3
@@ -317,7 +317,7 @@ def test_power_restoration_crowdsourcing_api(client):
         res_new_outage = client.post(
             "/api/power/report",
             json={"region_id": reg.id, "comment": "Caiu novamente agora"},
-            headers={"X-Forwarded-For": "10.0.0.50"}
+            environ_base={"REMOTE_ADDR": "10.0.0.50"}
         )
         assert res_new_outage.status_code == 200
         assert res_new_outage.get_json()["status"] == "investigating"
@@ -373,7 +373,7 @@ def test_power_telemetry_probes_and_consensus(client):
         res_corr = client.post(
             "/api/power/report",
             json={"region_id": reg.id, "comment": "Confirmando que caiu a energia no bairro"},
-            headers={"X-Forwarded-For": "172.16.0.99"}
+            environ_base={"REMOTE_ADDR": "172.16.0.99"}
         )
         assert res_corr.status_code == 200
         corr_data = res_corr.get_json()
@@ -386,8 +386,9 @@ def test_power_telemetry_probes_and_consensus(client):
         assert "total_probes" in res_probes_api.get_json()
 
 
-def test_power_official_bulletins_api(client):
+def test_power_official_bulletins_api(client, monkeypatch):
     """Valida a ingestão, consulta e impacto de notas oficiais da concessionária e Defesa Civil (Fase 3)."""
+    monkeypatch.setenv("ADMIN_API_TOKEN", "token-de-teste")
     with client.application.app_context():
         reg = Region.query.first()  # municipality = "Rio Grande"
         assert reg is not None
@@ -402,7 +403,8 @@ def test_power_official_bulletins_api(client):
             "severity": "critico",
             "status": "ativo"
         }
-        res_post = client.post("/api/power/bulletins", json=bulletin_payload)
+        res_post = client.post("/api/power/bulletins", json=bulletin_payload,
+                               headers={"X-Admin-Token": "token-de-teste"})
         assert res_post.status_code == 201
         post_data = res_post.get_json()
         assert post_data["success"] is True
@@ -428,3 +430,237 @@ def test_power_official_bulletins_api(client):
 
 
 
+
+
+def test_risk_ignores_expired_forecasts(client):
+    """Previsões vencidas (horários passados ainda não purgados) não entram no risco nem nas APIs."""
+    from datetime import timedelta
+    with client.application.app_context():
+        reg = Region.query.first()
+        hour = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0)
+        for h in range(1, 25):
+            # Passado: chuva forte (deve ser ignorada) | Futuro: tempo seco
+            db.session.add(WeatherObservation(region_id=reg.id, observed_at=hour - timedelta(hours=h),
+                                              is_forecast=True, precipitation_mm=3.0, wind_speed=10.0, source="t"))
+            db.session.add(WeatherObservation(region_id=reg.id, observed_at=hour + timedelta(hours=h),
+                                              is_forecast=True, precipitation_mm=0.0, wind_speed=10.0, source="t"))
+        db.session.add(WeatherObservation(region_id=reg.id, observed_at=hour, is_forecast=False,
+                                          precipitation_mm=0.0, wind_speed=5.0, humidity_percent=60.0, source="t"))
+        db.session.commit()
+
+        assessment = calculate_region_risk(reg)
+        assert assessment.factors["precipitacao_40pct"]["acumulado_previsto_24h_mm"] == 0.0
+        assert assessment.score < 25
+
+    summary = client.get("/api/weather-summary?format=list").get_json()
+    assert summary[0]["rain_next_24h_mm"] == 0.0
+
+
+def test_weather_api_has_no_stale_forecast_fallback(client):
+    """Sem horários futuros, a previsão de 24h deve vir vazia (sem exibir dados passados)."""
+    from datetime import timedelta
+    with client.application.app_context():
+        reg = Region.query.first()
+        past = datetime.now(timezone.utc) - timedelta(hours=5)
+        db.session.add(WeatherObservation(region_id=reg.id, observed_at=past, is_forecast=True,
+                                          precipitation_mm=10.0, source="t"))
+        db.session.commit()
+        region_id = reg.id
+
+    data = client.get(f"/api/weather/{region_id}").get_json()
+    assert data["forecast_24h"] == []
+
+
+class _NoTestingConfig:
+    SQLALCHEMY_DATABASE_URI = "sqlite:///:memory:"
+    SQLALCHEMY_TRACK_MODIFICATIONS = False
+
+
+def test_create_app_does_not_start_scheduler(monkeypatch):
+    """create_app() é usado por scripts e pelo preflight: não pode iniciar o agendador."""
+    from app.scheduler import scheduler
+    monkeypatch.delenv("DISABLE_SCHEDULER", raising=False)
+    monkeypatch.delenv("WERKZEUG_RUN_MAIN", raising=False)
+    create_app(_NoTestingConfig)
+    assert not scheduler.running
+
+
+def test_scheduler_skips_reloader_parent_process(monkeypatch):
+    """Com debug/reloader ativo, o processo pai (sem WERKZEUG_RUN_MAIN) não inicia o agendador."""
+    from app.scheduler import scheduler, init_scheduler
+    monkeypatch.delenv("DISABLE_SCHEDULER", raising=False)
+    monkeypatch.delenv("WERKZEUG_RUN_MAIN", raising=False)
+    app = create_app(_NoTestingConfig)
+    app.debug = True
+    init_scheduler(app)
+    assert not scheduler.running
+
+
+def test_circular_mean_wind_direction():
+    """Direção do vento usa média circular: 350° e 10° = 0° (norte), não 180° (sul)."""
+    from app.collectors.open_meteo import _circular_mean_deg
+    assert _circular_mean_deg([350, 10]) == 0.0
+    assert _circular_mean_deg([340, 350, 20]) == 356.5
+    assert _circular_mean_deg([80, 100]) == 90.0
+    assert _circular_mean_deg([270, None, 270]) == 270.0
+    assert _circular_mean_deg([None, None]) is None
+    assert _circular_mean_deg([90, 270]) == 90.0  # opostos: mantém o modelo principal
+
+
+def test_collector_saves_circular_wind_direction(client):
+    """O coletor grava a direção consensual correta nas séries observada e prevista."""
+    from datetime import timedelta
+    from app.collectors.open_meteo import save_region_weather
+    hour = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0)
+    times = [(hour + timedelta(hours=h)).strftime("%Y-%m-%dT%H:00") for h in range(3)]
+    hourly = {"time": times}
+    for suffix, direction in [("_best_match", 350), ("_ecmwf_ifs025", 10), ("_gfs_seamless", 0)]:
+        hourly[f"wind_direction_10m{suffix}"] = [direction] * 3
+        hourly[f"wind_speed_10m{suffix}"] = [20.0] * 3
+        hourly[f"temperature_2m{suffix}"] = [18.0] * 3
+    current = {
+        "time": times[0],
+        "wind_direction_10m_best_match": 355,
+        "wind_direction_10m_ecmwf_ifs025": 5,
+        "wind_speed_10m_best_match": 20.0,
+    }
+
+    with client.application.app_context():
+        reg = Region.query.first()
+        save_region_weather(reg, {"current": current, "hourly": hourly})
+        obs = WeatherObservation.query.filter_by(region_id=reg.id, is_forecast=False).first()
+        fcs = WeatherObservation.query.filter_by(region_id=reg.id, is_forecast=True).all()
+        assert obs.wind_direction == 0.0
+        assert len(fcs) == 3
+        assert all(f.wind_direction == 0.0 for f in fcs)
+
+
+def _fake_era5_october(missing_last_days: int = 0):
+    """Série diária simulada de 10/2026 (31 dias); os últimos dias podem vir null (ERA5 atrasado)."""
+    def fake_fetch(lat, lon, start_date, end_date):
+        rain = [2.0] * 31
+        temp = [18.0] * 31
+        for i in range(31 - missing_last_days, 31):
+            rain[i] = None
+            temp[i] = None
+        return {
+            "precipitation_sum": rain,
+            "temperature_2m_mean": temp,
+            "temperature_2m_max": [24.0] * 31,
+            "temperature_2m_min": [12.0] * 31,
+            "wind_speed_10m_max": [30.0] * 31,
+        }
+    return fake_fetch
+
+
+def test_era5_availability_window():
+    """Outubro (último dia 31) só fica disponível a partir de 06/11."""
+    from app.services.monthly_consolidation import is_era5_available
+    assert not is_era5_available(2026, 10, datetime(2026, 11, 1, 3, 0, tzinfo=timezone.utc))
+    assert not is_era5_available(2026, 10, datetime(2026, 11, 5, 23, 0, tzinfo=timezone.utc))
+    assert is_era5_available(2026, 10, datetime(2026, 11, 6, 3, 0, tzinfo=timezone.utc))
+
+
+def test_consolidation_waits_for_era5(client, monkeypatch):
+    """No dia 1º, o mês fechado não é consolidado nem consultado na API."""
+    from app.models import MonthlyClimateSummary
+    from app.services import monthly_consolidation as mc
+    calls = []
+    monkeypatch.setattr(mc, "fetch_month_daily", lambda *a: calls.append(a) or _fake_era5_october()(*a))
+    with client.application.app_context():
+        res = mc.consolidate_closed_month(reference_date=datetime(2026, 11, 1, 3, 0, tzinfo=timezone.utc))
+        assert res["status"] == "awaiting_era5"
+        assert calls == []
+        assert MonthlyClimateSummary.query.count() == 0
+
+
+def test_consolidation_skips_incomplete_series_and_retries(client, monkeypatch):
+    """Série com dias null não é gravada; numa verificação seguinte, com a série completa, consolida."""
+    from app.models import MonthlyClimateSummary
+    from app.services import monthly_consolidation as mc
+    ref = datetime(2026, 11, 7, 3, 0, tzinfo=timezone.utc)
+    with client.application.app_context():
+        monkeypatch.setattr(mc, "fetch_month_daily", _fake_era5_october(missing_last_days=5))
+        res = mc.consolidate_closed_month(reference_date=ref)
+        assert res["incomplete_regions"] == 1
+        assert res["updated_regions"] == 0
+        assert MonthlyClimateSummary.query.filter_by(year=2026, month=10).count() == 0
+
+        monkeypatch.setattr(mc, "fetch_month_daily", _fake_era5_october(missing_last_days=0))
+        res = mc.consolidate_closed_month(reference_date=ref)
+        assert res["updated_regions"] == 1
+        rec = MonthlyClimateSummary.query.filter_by(year=2026, month=10).one()
+        assert rec.total_rain_mm == 62.0
+        assert rec.rainy_days == 31
+
+
+# ------------------------- Segurança (item 5) -------------------------
+
+def test_run_server_settings_never_expose_debugger():
+    """Padrão local com debug; exposto na rede, o debugger é sempre desligado."""
+    from run import resolve_server_settings
+    assert resolve_server_settings({}) == ("127.0.0.1", 5000, True)
+    assert resolve_server_settings({"CLIMAE_HOST": "0.0.0.0"}) == ("0.0.0.0", 5000, False)
+    assert resolve_server_settings({"CLIMAE_HOST": "0.0.0.0", "FLASK_DEBUG": "1"})[2] is False
+    assert resolve_server_settings({"FLASK_DEBUG": "0"})[2] is False
+    assert resolve_server_settings({"CLIMAE_PORT": "8080"})[1] == 8080
+
+
+def test_bulletin_post_requires_admin_token(client, monkeypatch):
+    """Boletins 'oficiais' só podem ser criados com o token administrativo correto."""
+    from app.models import PowerUtilityBulletin
+    payload = {"municipality": "Rio Grande", "headline": "Falso", "body": "Falso",
+               "source": "CEEE Grupo Equatorial", "affected_customers": 9999}
+
+    monkeypatch.delenv("ADMIN_API_TOKEN", raising=False)
+    assert client.post("/api/power/bulletins", json=payload).status_code == 403
+    assert client.post("/api/power/bulletins", json=payload,
+                       headers={"X-Admin-Token": ""}).status_code == 403
+
+    monkeypatch.setenv("ADMIN_API_TOKEN", "segredo")
+    assert client.post("/api/power/bulletins", json=payload).status_code == 403
+    assert client.post("/api/power/bulletins", json=payload,
+                       headers={"X-Admin-Token": "errado"}).status_code == 403
+    with client.application.app_context():
+        assert PowerUtilityBulletin.query.count() == 0
+
+    assert client.post("/api/power/bulletins", json=payload,
+                       headers={"X-Admin-Token": "segredo"}).status_code == 201
+
+
+def test_power_cooldown_ignores_spoofed_forwarded_for(client):
+    """Forjar X-Forwarded-For não cria 'novos moradores' para burlar o cooldown."""
+    with client.application.app_context():
+        reg_id = Region.query.first().id
+    first = client.post("/api/power/report", json={"region_id": reg_id})
+    assert first.status_code == 200
+    for fake_ip in ("1.2.3.4", "5.6.7.8"):
+        res = client.post("/api/power/report", json={"region_id": reg_id},
+                          headers={"X-Forwarded-For": fake_ip})
+        assert res.status_code == 429
+    status = client.get(f"/api/power/status/{reg_id}").get_json()
+    assert status["reports_30m"] == 1
+    assert status["status"] != "outage_reported"
+
+
+def test_alerts_pagination_is_bounded(client):
+    """per_page é limitado e page inválido não quebra a API."""
+    data = client.get("/api/alerts?per_page=1000000&page=-3").get_json()
+    assert data["current_page"] == 1
+    from app.routes.main import MAX_PER_PAGE
+    with client.application.app_context():
+        reg = Region.query.first()
+        now = datetime.now(timezone.utc)
+        for i in range(MAX_PER_PAGE + 10):
+            db.session.add(Alert(region_id=reg.id, triggered_rule="r", created_at=now,
+                                 channel="painel", status="ok", dedup_key=f"k{i}"))
+        db.session.commit()
+    data = client.get("/api/alerts?per_page=1000000").get_json()
+    assert len(data["alerts"]) == MAX_PER_PAGE
+
+
+def test_occurrences_invalid_dates_return_400(client):
+    """Datas malformadas retornam 400 com mensagem, e não erro 500."""
+    assert client.get("/api/occurrences?start_date=2026-13-45").status_code == 400
+    assert client.get("/api/occurrences?end_date=ontem").status_code == 400
+    assert client.get("/api/occurrences?start_date=2026-01-01&end_date=2026-01-31").status_code == 200
