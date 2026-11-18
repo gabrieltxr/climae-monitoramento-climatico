@@ -714,6 +714,40 @@ def test_power_cooldown_ignores_spoofed_forwarded_for(client):
     assert status["status"] != "outage_reported"
 
 
+def test_power_ip_cap_blocks_user_agent_rotation(client):
+    """Trocar o User-Agent não deixa um único IP disparar 'Falta de Luz Reportada' (3 relatos)."""
+    with client.application.app_context():
+        reg_id = Region.query.first().id
+    codes = [
+        client.post("/api/power/report", json={"region_id": reg_id},
+                    headers={"User-Agent": f"agente-{i}"}).status_code
+        for i in range(4)
+    ]
+    assert codes == [200, 200, 429, 429]
+    status = client.get(f"/api/power/status/{reg_id}").get_json()
+    assert status["reports_30m"] == 2
+    assert status["status"] != "outage_reported"
+
+    # Outro IP (outro morador) continua podendo relatar e completa os 3 relatos.
+    res = client.post("/api/power/report", json={"region_id": reg_id},
+                      environ_base={"REMOTE_ADDR": "10.0.0.7"})
+    assert res.status_code == 200
+    assert client.get(f"/api/power/status/{reg_id}").get_json()["status"] == "outage_reported"
+
+
+def test_ip_report_limiter_window_and_regions():
+    """A vaga libera quando o relato mais antigo sai da janela; regiões contam separado."""
+    from datetime import timedelta
+    from app.services.power_service import IpReportLimiter
+    lim = IpReportLimiter(limit=2, window_minutes=30)
+    t0 = datetime(2026, 11, 18, 12, 0, tzinfo=timezone.utc)
+    assert lim.try_acquire("ip", 1, t0) == (True, 0)
+    assert lim.try_acquire("ip", 1, t0 + timedelta(minutes=10)) == (True, 0)
+    assert lim.try_acquire("ip", 1, t0 + timedelta(minutes=20)) == (False, 10)
+    assert lim.try_acquire("ip", 2, t0 + timedelta(minutes=20)) == (True, 0)
+    assert lim.try_acquire("ip", 1, t0 + timedelta(minutes=30, seconds=1)) == (True, 0)
+
+
 def test_alerts_pagination_is_bounded(client):
     """per_page é limitado e page inválido não quebra a API."""
     data = client.get("/api/alerts?per_page=1000000&page=-3").get_json()

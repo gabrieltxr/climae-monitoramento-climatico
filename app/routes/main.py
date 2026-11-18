@@ -432,7 +432,7 @@ def api_power_status(region_id: int):
 @main_bp.route('/api/power/report', methods=['POST'])
 def api_power_report():
     """Registra um relato colaborativo de falta de energia com proteção anti-spam."""
-    from app.services.power_service import generate_reporter_hash, record_power_outage_report
+    from app.services.power_service import generate_ip_key, generate_reporter_hash, record_power_outage_report
     data = request.get_json() or {}
     region_id = data.get('region_id')
     comment = data.get('comment')
@@ -441,7 +441,7 @@ def api_power_report():
         return jsonify({"success": False, "error": "ID da região é obrigatório."}), 400
 
     reporter_hash = generate_reporter_hash(request)
-    result = record_power_outage_report(region_id, reporter_hash, comment)
+    result = record_power_outage_report(region_id, reporter_hash, comment, ip_key=generate_ip_key(request))
     status_code = 200 if result.get("success") else 429
     return jsonify(result), status_code
 

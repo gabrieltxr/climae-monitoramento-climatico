@@ -10,7 +10,9 @@ import hashlib
 import hmac
 import math
 import socket
+import threading
 import time
+from collections import deque
 from datetime import datetime, timedelta, timezone
 from flask import Request, current_app
 from app.models import (
@@ -46,6 +48,62 @@ def generate_reporter_hash(request: Request) -> str:
     secret = str(current_app.config.get("SECRET_KEY") or "climae-salt-power").encode("utf-8")
     raw_str = f"power:{client_ip}:{user_agent}".encode("utf-8")
     return hmac.new(secret, raw_str, hashlib.sha256).hexdigest()
+
+
+# Teto de relatos de falta de luz por IP e região. O hash do visitante inclui o
+# User-Agent para que moradores atrás do mesmo IP (CGNAT) relatem cada um o seu, mas
+# trocar o User-Agent é trivial. O teto fica abaixo dos 3 relatos que exibem
+# "Falta de Luz Reportada", então um único IP não consegue disparar o aviso sozinho.
+IP_REPORT_LIMIT = 2
+IP_REPORT_WINDOW_MINUTES = 30
+
+
+def generate_ip_key(request: Request) -> str:
+    """HMAC só do IP da conexão (sem User-Agent), para o teto por IP. Nunca é gravado no banco."""
+    client_ip = request.remote_addr or "127.0.0.1"
+    secret = str(current_app.config.get("SECRET_KEY") or "climae-salt-power").encode("utf-8")
+    return hmac.new(secret, f"power-ip:{client_ip}".encode("utf-8"), hashlib.sha256).hexdigest()
+
+
+class IpReportLimiter:
+    """
+    Janela deslizante em memória: no máximo `limit` relatos por (IP, região) em `window`.
+    Fica em memória de propósito (sem mudança no banco); reiniciar o servidor zera a
+    contagem. Depende de um único processo servindo o app, como garante o run.py.
+    """
+
+    MAX_KEYS = 10_000
+
+    def __init__(self, limit: int = IP_REPORT_LIMIT, window_minutes: int = IP_REPORT_WINDOW_MINUTES):
+        self.limit = limit
+        self.window = timedelta(minutes=window_minutes)
+        self._hits: dict[tuple[str, int], deque] = {}
+        self._lock = threading.Lock()
+
+    def try_acquire(self, ip_key: str, region_id: int, now: datetime = None) -> tuple[bool, int]:
+        """Reserva uma vaga se houver. Retorna (permitido, minutos até liberar uma vaga)."""
+        now = now or datetime.now(timezone.utc)
+        threshold = now - self.window
+        with self._lock:
+            if len(self._hits) > self.MAX_KEYS:
+                self._purge(threshold)
+            hits = self._hits.setdefault((ip_key, region_id), deque())
+            while hits and hits[0] <= threshold:
+                hits.popleft()
+            if len(hits) >= self.limit:
+                remaining = (hits[0] + self.window - now).total_seconds() / 60
+                return False, max(1, int(math.ceil(remaining)))
+            hits.append(now)
+            return True, 0
+
+    def _purge(self, threshold: datetime):
+        for key in [k for k, hits in self._hits.items() if not hits or hits[-1] <= threshold]:
+            del self._hits[key]
+
+
+def get_ip_report_limiter() -> IpReportLimiter:
+    """Um limitador por instância do app (os testes criam um app novo a cada caso)."""
+    return current_app.extensions.setdefault("power_ip_report_limiter", IpReportLimiter())
 
 
 def check_report_cooldown(region_id: int, reporter_hash: str, cooldown_minutes: int = 30) -> tuple[bool, int]:
@@ -104,9 +162,10 @@ def check_restoration_cooldown(region_id: int, reporter_hash: str, cooldown_minu
     return False, remaining
 
 
-def record_power_outage_report(region_id: int, reporter_hash: str, comment: str = None) -> dict:
+def record_power_outage_report(region_id: int, reporter_hash: str, comment: str = None, ip_key: str = None) -> dict:
     """
     Registra um relato de falta de energia com validação de cooldown.
+    Com `ip_key`, aplica também o teto de relatos por IP e região (IpReportLimiter).
     """
     region = db.session.get(Region, region_id)
     if not region:
@@ -119,6 +178,18 @@ def record_power_outage_report(region_id: int, reporter_hash: str, comment: str 
             "error": f"Você já registrou um relato recente para esta localidade. Aguarde mais {remaining} minuto(s).",
             "cooldown_remaining": remaining,
         }
+
+    if ip_key is not None:
+        allowed, remaining = get_ip_report_limiter().try_acquire(ip_key, region_id)
+        if not allowed:
+            return {
+                "success": False,
+                "error": (
+                    "Já recebemos relatos suficientes da sua rede para esta localidade. "
+                    f"Aguarde mais {remaining} minuto(s)."
+                ),
+                "cooldown_remaining": remaining,
+            }
 
     clean_comment = comment.strip()[:140] if comment else None
     now_utc = datetime.now(timezone.utc)
