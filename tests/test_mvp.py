@@ -664,3 +664,215 @@ def test_occurrences_invalid_dates_return_400(client):
     assert client.get("/api/occurrences?start_date=2026-13-45").status_code == 400
     assert client.get("/api/occurrences?end_date=ontem").status_code == 400
     assert client.get("/api/occurrences?start_date=2026-01-01&end_date=2026-01-31").status_code == 200
+
+
+def _stub_scheduler_startup_io(monkeypatch):
+    """Evita rede nas rotinas que o agendador executa ao iniciar."""
+    import app.scheduler as sched_mod
+    import app.services.power_service as power_mod
+    monkeypatch.delenv("DISABLE_SCHEDULER", raising=False)
+    monkeypatch.delenv("WERKZEUG_RUN_MAIN", raising=False)
+    monkeypatch.setattr(sched_mod, "run_scheduled_cycle", lambda app: None)
+    monkeypatch.setattr(sched_mod, "consolidate_closed_month", lambda *a, **k: None)
+    monkeypatch.setattr(power_mod, "seed_default_probes_if_empty", lambda: None)
+
+
+def test_run_scheduler_script_starts_even_with_debug_env(monkeypatch):
+    """O processo dedicado (uso com WSGI) inicia o agendador mesmo com FLASK_DEBUG=1 no ambiente."""
+    from app.scheduler import scheduler
+    from scripts import run_scheduler
+    _stub_scheduler_startup_io(monkeypatch)
+    monkeypatch.setenv("FLASK_DEBUG", "1")
+    app = create_app(_NoTestingConfig)
+    app.debug = True
+    try:
+        assert run_scheduler.start(app) is True
+        job_ids = {job.id for job in scheduler.get_jobs()}
+        assert {"open_meteo_collector", "database_pruning_job", "monthly_climate_consolidator"} <= job_ids
+    finally:
+        if scheduler.running:
+            scheduler.shutdown(wait=False)
+
+
+def test_run_scheduler_script_shuts_down_on_stop(monkeypatch):
+    """Ao receber o pedido de parada (Ctrl+C/SIGTERM), o script encerra o agendador."""
+    import signal
+    import threading
+    from app.scheduler import scheduler
+    from scripts import run_scheduler
+    _stub_scheduler_startup_io(monkeypatch)
+    monkeypatch.setattr(signal, "signal", lambda *a, **k: None)
+    stop = threading.Event()
+    stop.set()
+    try:
+        assert run_scheduler.main(create_app(_NoTestingConfig), stop_event=stop) == 0
+        assert not scheduler.running
+    finally:
+        if scheduler.running:
+            scheduler.shutdown(wait=False)
+
+
+def test_run_scheduler_script_respects_disable_flag(monkeypatch):
+    """Com DISABLE_SCHEDULER=1 o script não sobe nada e sai com código 1."""
+    from app.scheduler import scheduler
+    from scripts import run_scheduler
+    _stub_scheduler_startup_io(monkeypatch)
+    monkeypatch.setenv("DISABLE_SCHEDULER", "1")
+    assert run_scheduler.main(create_app(_NoTestingConfig)) == 1
+    assert not scheduler.running
+
+
+def test_wind_direction_weighted_by_speed():
+    """Direção média ponderada pela velocidade: vento fraco quase não puxa a média."""
+    from app.collectors.open_meteo import _circular_mean_deg
+    # Norte a 40 km/h + leste a 2 km/h: fica praticamente norte (sem peso daria 45°).
+    assert _circular_mean_deg([0, 90], [40, 2]) == 2.9
+    # Opostos com velocidades bem diferentes: vence o vento forte.
+    assert _circular_mean_deg([90, 270], [30, 2]) == 90.0
+    assert _circular_mean_deg([90, 270], [2, 30]) == 270.0
+    # Velocidade faltando ou tudo calmo: volta à média sem peso.
+    assert _circular_mean_deg([0, 90], [40, None]) == 45.0
+    assert _circular_mean_deg([0, 90], [0, 0]) == 45.0
+
+
+def test_wind_direction_near_opposite_keeps_main_model():
+    """Direções quase opostas (concordância baixa) mantêm o modelo principal em vez de um ângulo arbitrário."""
+    from app.collectors.open_meteo import _circular_mean_deg
+    assert _circular_mean_deg([90, 268]) == 90.0
+    assert _circular_mean_deg([90, 268], [20, 20]) == 90.0
+
+
+def test_wind_direction_pairs_speed_with_same_model():
+    """Direção e velocidade são casadas pelo modelo, mesmo quando um modelo não traz direção."""
+    from app.collectors.open_meteo import _aligned_model_series, _wind_direction_at_index
+    hourly = {
+        "wind_speed_10m": [10],                 # modelo sem direção correspondente
+        "wind_direction_10m_best_match": [0],
+        "wind_speed_10m_best_match": [40],
+        "wind_direction_10m_ecmwf_ifs025": [90],
+        "wind_speed_10m_ecmwf_ifs025": [2],
+    }
+    dirs = _aligned_model_series(hourly, "wind_direction_10m")
+    speeds = _aligned_model_series(hourly, "wind_speed_10m")
+    assert _wind_direction_at_index(dirs, speeds, 0) == 2.9
+    assert _wind_direction_at_index(dirs, speeds, 5) is None
+
+
+def test_clear_legacy_wind_direction_only_touches_old_observations(client):
+    """Apaga só a direção de observações coletadas antes da correção; simulação não grava nada."""
+    from datetime import timedelta
+    from scripts.clear_legacy_wind_direction import FIX_CUTOFF_UTC, clear_legacy_wind_direction
+    with client.application.app_context():
+        reg = Region.query.first()
+        before = FIX_CUTOFF_UTC - timedelta(days=1)
+        after = FIX_CUTOFF_UTC + timedelta(hours=1)
+
+        def obs(hour, collected, forecast=False):
+            o = WeatherObservation(region_id=reg.id, observed_at=datetime(2026, 10, 20, hour),
+                                   collected_at=collected, is_forecast=forecast,
+                                   wind_direction=180.0, wind_speed=10.0, source="teste")
+            db.session.add(o)
+            return o
+
+        old = obs(0, before)
+        old_no_collected = obs(1, None)
+        new = obs(2, after)
+        old_forecast = obs(3, before, forecast=True)
+        db.session.commit()
+        # Registros antigos sem collected_at (o default do modelo preenche, então força NULL).
+        WeatherObservation.query.filter_by(id=old_no_collected.id).update({"collected_at": None})
+        db.session.commit()
+
+        assert clear_legacy_wind_direction(apply=False) == 2
+        db.session.expire_all()
+        assert old.wind_direction == 180.0  # simulação não altera
+
+        assert clear_legacy_wind_direction(apply=True) == 2
+        db.session.expire_all()
+        assert old.wind_direction is None
+        assert old_no_collected.wind_direction is None
+        assert old.wind_speed == 10.0           # só a direção é apagada
+        assert new.wind_direction == 180.0      # coletada após a correção
+        assert old_forecast.wind_direction == 180.0  # previsões não são tocadas
+        assert clear_legacy_wind_direction(apply=True) == 0  # idempotente
+
+
+def _file_db_app_with_legacy_obs(tmp_path):
+    """App com banco SQLite em arquivo e uma observação antiga (direção 180°)."""
+    from datetime import timedelta
+    from scripts.clear_legacy_wind_direction import FIX_CUTOFF_UTC
+
+    class FileDbConfig:
+        TESTING = True
+        SQLALCHEMY_DATABASE_URI = f"sqlite:///{(tmp_path / 'climae.db').as_posix()}"
+        SQLALCHEMY_TRACK_MODIFICATIONS = False
+
+    app = create_app(FileDbConfig)
+    with app.app_context():
+        db.create_all()
+        reg = Region(municipality="Rio Grande", name="Centro", latitude=-32.0, longitude=-52.1)
+        db.session.add(reg)
+        db.session.commit()
+        db.session.add(WeatherObservation(region_id=reg.id, observed_at=datetime(2026, 10, 20, 0),
+                                          collected_at=FIX_CUTOFF_UTC - timedelta(days=1),
+                                          is_forecast=False, wind_direction=180.0, source="teste"))
+        db.session.commit()
+    return app
+
+
+def _stored_directions(db_file):
+    import sqlite3
+    con = sqlite3.connect(db_file)
+    try:
+        return [r[0] for r in con.execute("SELECT wind_direction FROM weather_observations")]
+    finally:
+        con.close()
+
+
+def test_clear_legacy_wind_direction_apply_makes_backup_first(tmp_path):
+    """Com --apply, o banco é copiado antes; a cópia guarda as direções originais."""
+    from scripts import clear_legacy_wind_direction as script
+    app = _file_db_app_with_legacy_obs(tmp_path)
+    with app.app_context():
+        db.engine.dispose()
+
+    assert script.main(["--apply"], app=app) == 0
+    with app.app_context():
+        db.engine.dispose()
+
+    backups = list(tmp_path.glob("climae.backup-*.db"))
+    assert len(backups) == 1
+    assert _stored_directions(backups[0]) == [180.0]
+    assert _stored_directions(tmp_path / "climae.db") == [None]
+
+
+def test_clear_legacy_wind_direction_backup_failure_changes_nothing(tmp_path, monkeypatch):
+    """Se a cópia de segurança falhar, nada é apagado."""
+    from scripts import clear_legacy_wind_direction as script
+    app = _file_db_app_with_legacy_obs(tmp_path)
+
+    def broken_backup(*a, **k):
+        raise OSError("disco cheio")
+    monkeypatch.setattr(script, "backup_sqlite_database", broken_backup)
+
+    assert script.main(["--apply"], app=app) == 1
+    with app.app_context():
+        db.engine.dispose()
+    assert _stored_directions(tmp_path / "climae.db") == [180.0]
+    assert not list(tmp_path.glob("climae.backup-*.db"))
+
+
+def test_backup_sqlite_database_refuses_missing_or_existing(tmp_path):
+    """Não copia banco inexistente nem sobrescreve uma cópia já existente."""
+    from scripts.clear_legacy_wind_direction import backup_sqlite_database
+    with pytest.raises(FileNotFoundError):
+        backup_sqlite_database(str(tmp_path / "nao-existe.db"))
+
+    import sqlite3
+    src = tmp_path / "x.db"
+    sqlite3.connect(src).close()
+    when = datetime(2026, 11, 18, 12, 0, 0)
+    first = backup_sqlite_database(str(src), now=when)
+    assert first.endswith("x.backup-20261118-120000.db")
+    with pytest.raises(FileExistsError):
+        backup_sqlite_database(str(src), now=when)

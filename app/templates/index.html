@@ -551,6 +551,19 @@
         .metric-value { font-size: 1.75rem; font-weight: 300; margin-top: 0.35rem; letter-spacing: -0.03em; color: #ffffff; }
         .metric-unit { font-size: 0.85rem; color: var(--text-muted); font-weight: 400; margin-left: 2px; }
 
+        .chart-empty {
+            position: absolute;
+            inset: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 1rem;
+            text-align: center;
+            font-size: 0.85rem;
+            color: var(--text-muted);
+        }
+        .chart-empty[hidden] { display: none; }
+
         .chart-container {
             position: relative;
             height: 235px;
@@ -1257,6 +1270,9 @@
             </div>
             <div class="chart-container">
                 <canvas id="forecastChart"></canvas>
+                <div id="forecastEmpty" class="chart-empty" hidden>
+                    Previsão indisponível — aguardando a próxima coleta.
+                </div>
             </div>
 
             <!-- MONITORAMENTO DE ENERGIA ELÉTRICA (FASE 1 - CROWDSOURCING) -->
@@ -2604,12 +2620,28 @@
                 map.panTo([data.region.latitude, data.region.longitude]);
             }
 
-            const labels = data.forecast_24h.map(f => formatBRT(f.time, true));
-            const temps = data.forecast_24h.map(f => f.temperature_c);
-            const probs = data.forecast_24h.map(f => f.rain_probability);
+            const canvas = document.getElementById('forecastChart');
+            const emptyMsg = document.getElementById('forecastEmpty');
+            if (chartInstance) {
+                chartInstance.destroy();
+                chartInstance = null;
+            }
 
-            const ctx = document.getElementById('forecastChart').getContext('2d');
-            if (chartInstance) chartInstance.destroy();
+            const forecast = Array.isArray(data.forecast_24h) ? data.forecast_24h : [];
+            if (forecast.length === 0) {
+                // Sem horários futuros (ex.: coleta parada): avisa em vez de exibir um gráfico vazio.
+                canvas.hidden = true;
+                emptyMsg.hidden = false;
+                return;
+            }
+            canvas.hidden = false;
+            emptyMsg.hidden = true;
+
+            const labels = forecast.map(f => formatBRT(f.time, true));
+            const temps = forecast.map(f => f.temperature_c);
+            const probs = forecast.map(f => f.rain_probability);
+
+            const ctx = canvas.getContext('2d');
 
             const tempGrad = ctx.createLinearGradient(0, 0, 0, 220);
             tempGrad.addColorStop(0, 'rgba(56, 189, 248, 0.35)');

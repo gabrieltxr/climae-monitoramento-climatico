@@ -63,9 +63,12 @@ def fetch_multi_model_weather(latitude: float, longitude: float) -> dict | None:
         return None
 
 
+MODEL_SUFFIXES = ["", "_best_match", "_ecmwf_ifs025", "_gfs_seamless"]
+
+
 def _extract_model_series(container: dict, base_key: str) -> list[list]:
     series = []
-    for suffix in ["", "_best_match", "_ecmwf_ifs025", "_gfs_seamless"]:
+    for suffix in MODEL_SUFFIXES:
         k = f"{base_key}{suffix}"
         if k in container and isinstance(container[k], list):
             series.append(container[k])
@@ -80,33 +83,67 @@ def _avg_model_at_index(series_list: list[list], idx: int) -> float | None:
     return round(sum(vals) / len(vals), 1) if vals else None
 
 
-def _circular_mean_deg(values: list[float]) -> float | None:
+# Abaixo desta concordância (tamanho do vetor resultante / soma dos pesos), os modelos
+# divergem demais e a direção média não representa nenhum deles: mantém o modelo principal.
+WIND_DIR_MIN_CONSISTENCY = 0.10
+
+
+def _circular_mean_deg(values: list[float], weights: list[float] | None = None) -> float | None:
     """
-    Média circular de ângulos em graus (0-360), via soma de vetores unitários.
+    Média circular de ângulos em graus (0-360), via soma de vetores.
     A média aritmética simples falha perto do norte: (350° + 10°) / 2 = 180° (sul),
-    quando o correto é 0° (norte). Se os vetores se anulam (direções opostas),
-    a direção é indefinida e o primeiro valor (modelo principal) é mantido.
+    quando o correto é 0° (norte).
+
+    Com `weights` (velocidade do vento de cada modelo, alinhada a `values`), cada
+    direção vira um vetor com o tamanho da sua velocidade: vento fraco, cuja direção
+    é quase ruído, pesa pouco. Se faltar alguma velocidade, ou todas forem zero,
+    usa vetores unitários (todos com o mesmo peso).
+
+    Se os modelos divergem demais (concordância abaixo de WIND_DIR_MIN_CONSISTENCY,
+    ex.: direções quase opostas), a direção é indefinida e o primeiro valor
+    disponível (modelo principal) é mantido.
     """
-    vals = [float(v) for v in values if v is not None]
-    if not vals:
+    if weights is None:
+        weights = [None] * len(values)
+    pairs = [(float(v), w) for v, w in zip(values, weights) if v is not None]
+    if not pairs:
         return None
-    sin_sum = sum(math.sin(math.radians(v)) for v in vals)
-    cos_sum = sum(math.cos(math.radians(v)) for v in vals)
-    if math.hypot(sin_sum, cos_sum) < 1e-6:
+    vals = [v for v, _ in pairs]
+    ws = [w for _, w in pairs]
+    if any(w is None for w in ws) or sum(max(float(w), 0.0) for w in ws) <= 0:
+        ws = [1.0] * len(vals)
+    else:
+        ws = [max(float(w), 0.0) for w in ws]
+
+    sin_sum = sum(w * math.sin(math.radians(v)) for v, w in zip(vals, ws))
+    cos_sum = sum(w * math.cos(math.radians(v)) for v, w in zip(vals, ws))
+    if math.hypot(sin_sum, cos_sum) / sum(ws) < WIND_DIR_MIN_CONSISTENCY:
         return round(vals[0] % 360.0, 1)
     mean = math.degrees(math.atan2(sin_sum, cos_sum)) % 360.0
     return round(mean, 1) % 360.0
 
 
-def _circular_mean_at_index(series_list: list[list], idx: int) -> float | None:
-    return _circular_mean_deg([s[idx] for s in series_list if idx < len(s)])
+def _aligned_model_series(container: dict, base_key: str) -> list[list | None]:
+    """Séries por modelo na ordem de MODEL_SUFFIXES (None onde o modelo não veio),
+    para casar direção e velocidade do MESMO modelo."""
+    out = []
+    for suffix in MODEL_SUFFIXES:
+        s = container.get(f"{base_key}{suffix}")
+        out.append(s if isinstance(s, list) else None)
+    return out
 
 
-def _extract_current_direction(current: dict, base_key: str) -> float | None:
-    return _circular_mean_deg([
-        current.get(f"{base_key}{suffix}")
-        for suffix in ["", "_best_match", "_ecmwf_ifs025", "_gfs_seamless"]
-    ])
+def _wind_direction_at_index(dir_series: list[list | None], speed_series: list[list | None], idx: int) -> float | None:
+    def at(s):
+        return s[idx] if s is not None and idx < len(s) else None
+    return _circular_mean_deg([at(s) for s in dir_series], [at(s) for s in speed_series])
+
+
+def _extract_current_direction(current: dict, dir_key: str, speed_key: str) -> float | None:
+    return _circular_mean_deg(
+        [current.get(f"{dir_key}{suffix}") for suffix in MODEL_SUFFIXES],
+        [current.get(f"{speed_key}{suffix}") for suffix in MODEL_SUFFIXES],
+    )
 
 
 def _consensus_rain_at_index(series_list: list[list], idx: int, wmo_code: int | None = None) -> float:
@@ -161,7 +198,8 @@ def save_region_weather(region: Region, data: dict) -> dict:
     temp_series = _extract_model_series(hourly, "temperature_2m")
     hum_series = _extract_model_series(hourly, "relative_humidity_2m")
     wind_series = _extract_model_series(hourly, "wind_speed_10m")
-    wind_dir_series = _extract_model_series(hourly, "wind_direction_10m")
+    wind_dir_series = _aligned_model_series(hourly, "wind_direction_10m")
+    wind_speed_aligned = _aligned_model_series(hourly, "wind_speed_10m")
     precip_series = _extract_model_series(hourly, "precipitation")
     prob_series = _extract_model_series(hourly, "precipitation_probability")
 
@@ -173,7 +211,7 @@ def save_region_weather(region: Region, data: dict) -> dict:
         temp_final = _extract_current_value(current, "temperature_2m", "avg")
         hum_final = _extract_current_value(current, "relative_humidity_2m", "avg")
         wind_final = _extract_current_value(current, "wind_speed_10m", "avg")
-        wind_dir_final = _extract_current_direction(current, "wind_direction_10m")
+        wind_dir_final = _extract_current_direction(current, "wind_direction_10m", "wind_speed_10m")
         wmo_code = _extract_current_value(current, "weather_code", "max")
 
         cur_precip = _extract_current_value(current, "precipitation", "max") or 0.0
@@ -188,7 +226,7 @@ def save_region_weather(region: Region, data: dict) -> dict:
             )
             rain_final = max(rain_final, hourly_consensus_rain)
             if wind_dir_final is None:
-                wind_dir_final = _circular_mean_at_index(wind_dir_series, idx_now)
+                wind_dir_final = _wind_direction_at_index(wind_dir_series, wind_speed_aligned, idx_now)
 
         if rain_final == 0.0 and wmo_code is not None and int(wmo_code) in WMO_RAIN_CODES:
             rain_final = 0.2
@@ -233,7 +271,7 @@ def save_region_weather(region: Region, data: dict) -> dict:
         fc_temp = _avg_model_at_index(temp_series, i)
         fc_hum = _avg_model_at_index(hum_series, i)
         fc_wind = _avg_model_at_index(wind_series, i)
-        fc_wind_dir = _circular_mean_at_index(wind_dir_series, i)
+        fc_wind_dir = _wind_direction_at_index(wind_dir_series, wind_speed_aligned, i)
         fc_rain = _consensus_rain_at_index(precip_series, i)
         fc_prob = _avg_model_at_index(prob_series, i) or 0.0
 
