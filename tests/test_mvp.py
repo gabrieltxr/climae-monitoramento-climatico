@@ -756,3 +756,123 @@ def test_wind_direction_pairs_speed_with_same_model():
     speeds = _aligned_model_series(hourly, "wind_speed_10m")
     assert _wind_direction_at_index(dirs, speeds, 0) == 2.9
     assert _wind_direction_at_index(dirs, speeds, 5) is None
+
+
+def test_clear_legacy_wind_direction_only_touches_old_observations(client):
+    """Apaga só a direção de observações coletadas antes da correção; simulação não grava nada."""
+    from datetime import timedelta
+    from scripts.clear_legacy_wind_direction import FIX_CUTOFF_UTC, clear_legacy_wind_direction
+    with client.application.app_context():
+        reg = Region.query.first()
+        before = FIX_CUTOFF_UTC - timedelta(days=1)
+        after = FIX_CUTOFF_UTC + timedelta(hours=1)
+
+        def obs(hour, collected, forecast=False):
+            o = WeatherObservation(region_id=reg.id, observed_at=datetime(2026, 10, 20, hour),
+                                   collected_at=collected, is_forecast=forecast,
+                                   wind_direction=180.0, wind_speed=10.0, source="teste")
+            db.session.add(o)
+            return o
+
+        old = obs(0, before)
+        old_no_collected = obs(1, None)
+        new = obs(2, after)
+        old_forecast = obs(3, before, forecast=True)
+        db.session.commit()
+        # Registros antigos sem collected_at (o default do modelo preenche, então força NULL).
+        WeatherObservation.query.filter_by(id=old_no_collected.id).update({"collected_at": None})
+        db.session.commit()
+
+        assert clear_legacy_wind_direction(apply=False) == 2
+        db.session.expire_all()
+        assert old.wind_direction == 180.0  # simulação não altera
+
+        assert clear_legacy_wind_direction(apply=True) == 2
+        db.session.expire_all()
+        assert old.wind_direction is None
+        assert old_no_collected.wind_direction is None
+        assert old.wind_speed == 10.0           # só a direção é apagada
+        assert new.wind_direction == 180.0      # coletada após a correção
+        assert old_forecast.wind_direction == 180.0  # previsões não são tocadas
+        assert clear_legacy_wind_direction(apply=True) == 0  # idempotente
+
+
+def _file_db_app_with_legacy_obs(tmp_path):
+    """App com banco SQLite em arquivo e uma observação antiga (direção 180°)."""
+    from datetime import timedelta
+    from scripts.clear_legacy_wind_direction import FIX_CUTOFF_UTC
+
+    class FileDbConfig:
+        TESTING = True
+        SQLALCHEMY_DATABASE_URI = f"sqlite:///{(tmp_path / 'climae.db').as_posix()}"
+        SQLALCHEMY_TRACK_MODIFICATIONS = False
+
+    app = create_app(FileDbConfig)
+    with app.app_context():
+        db.create_all()
+        reg = Region(municipality="Rio Grande", name="Centro", latitude=-32.0, longitude=-52.1)
+        db.session.add(reg)
+        db.session.commit()
+        db.session.add(WeatherObservation(region_id=reg.id, observed_at=datetime(2026, 10, 20, 0),
+                                          collected_at=FIX_CUTOFF_UTC - timedelta(days=1),
+                                          is_forecast=False, wind_direction=180.0, source="teste"))
+        db.session.commit()
+    return app
+
+
+def _stored_directions(db_file):
+    import sqlite3
+    con = sqlite3.connect(db_file)
+    try:
+        return [r[0] for r in con.execute("SELECT wind_direction FROM weather_observations")]
+    finally:
+        con.close()
+
+
+def test_clear_legacy_wind_direction_apply_makes_backup_first(tmp_path):
+    """Com --apply, o banco é copiado antes; a cópia guarda as direções originais."""
+    from scripts import clear_legacy_wind_direction as script
+    app = _file_db_app_with_legacy_obs(tmp_path)
+    with app.app_context():
+        db.engine.dispose()
+
+    assert script.main(["--apply"], app=app) == 0
+    with app.app_context():
+        db.engine.dispose()
+
+    backups = list(tmp_path.glob("climae.backup-*.db"))
+    assert len(backups) == 1
+    assert _stored_directions(backups[0]) == [180.0]
+    assert _stored_directions(tmp_path / "climae.db") == [None]
+
+
+def test_clear_legacy_wind_direction_backup_failure_changes_nothing(tmp_path, monkeypatch):
+    """Se a cópia de segurança falhar, nada é apagado."""
+    from scripts import clear_legacy_wind_direction as script
+    app = _file_db_app_with_legacy_obs(tmp_path)
+
+    def broken_backup(*a, **k):
+        raise OSError("disco cheio")
+    monkeypatch.setattr(script, "backup_sqlite_database", broken_backup)
+
+    assert script.main(["--apply"], app=app) == 1
+    with app.app_context():
+        db.engine.dispose()
+    assert _stored_directions(tmp_path / "climae.db") == [180.0]
+    assert not list(tmp_path.glob("climae.backup-*.db"))
+
+
+def test_backup_sqlite_database_refuses_missing_or_existing(tmp_path):
+    """Não copia banco inexistente nem sobrescreve uma cópia já existente."""
+    from scripts.clear_legacy_wind_direction import backup_sqlite_database
+    with pytest.raises(FileNotFoundError):
+        backup_sqlite_database(str(tmp_path / "nao-existe.db"))
+
+    import sqlite3
+    src = tmp_path / "x.db"
+    sqlite3.connect(src).close()
+    when = datetime(2026, 11, 18, 12, 0, 0)
+    first = backup_sqlite_database(str(src), now=when)
+    assert first.endswith("x.backup-20261118-120000.db")
+    with pytest.raises(FileExistsError):
+        backup_sqlite_database(str(src), now=when)
