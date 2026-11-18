@@ -535,22 +535,38 @@ def test_collector_saves_circular_wind_direction(client):
         assert all(f.wind_direction == 0.0 for f in fcs)
 
 
-def _fake_era5_october(missing_last_days: int = 0):
-    """Série diária simulada de 10/2026 (31 dias); os últimos dias podem vir null (ERA5 atrasado)."""
+def _fake_era5(missing_last_days: int = 0, incomplete_months: tuple = ("2026-10",)):
+    """Série diária simulada do mês pedido; nos meses de `incomplete_months`, os últimos
+    `missing_last_days` dias vêm null (ERA5 atrasado)."""
     def fake_fetch(lat, lon, start_date, end_date):
-        rain = [2.0] * 31
-        temp = [18.0] * 31
-        for i in range(31 - missing_last_days, 31):
-            rain[i] = None
-            temp[i] = None
+        days = int(end_date[-2:])
+        rain = [2.0] * days
+        temp = [18.0] * days
+        if start_date[:7] in incomplete_months:
+            for i in range(days - missing_last_days, days):
+                rain[i] = None
+                temp[i] = None
         return {
             "precipitation_sum": rain,
             "temperature_2m_mean": temp,
-            "temperature_2m_max": [24.0] * 31,
-            "temperature_2m_min": [12.0] * 31,
-            "wind_speed_10m_max": [30.0] * 31,
+            "temperature_2m_max": [24.0] * days,
+            "temperature_2m_min": [12.0] * days,
+            "wind_speed_10m_max": [30.0] * days,
         }
     return fake_fetch
+
+
+def _fake_era5_october(missing_last_days: int = 0):
+    return _fake_era5(missing_last_days, incomplete_months=("2026-10",))
+
+
+def _seed_months(region_ids, months):
+    """Grava meses já consolidados (para isolar o mês sob teste da janela de revisão)."""
+    from app.models import db, MonthlyClimateSummary
+    for rid in region_ids:
+        for year, month in months:
+            db.session.add(MonthlyClimateSummary(region_id=rid, year=year, month=month, total_rain_mm=1.0))
+    db.session.commit()
 
 
 def test_era5_availability_window():
@@ -568,10 +584,12 @@ def test_consolidation_waits_for_era5(client, monkeypatch):
     calls = []
     monkeypatch.setattr(mc, "fetch_month_daily", lambda *a: calls.append(a) or _fake_era5_october()(*a))
     with client.application.app_context():
+        from app.models import Region
+        _seed_months([r.id for r in Region.query.all()], [(2026, 8), (2026, 9)])
         res = mc.consolidate_closed_month(reference_date=datetime(2026, 11, 1, 3, 0, tzinfo=timezone.utc))
         assert res["status"] == "awaiting_era5"
         assert calls == []
-        assert MonthlyClimateSummary.query.count() == 0
+        assert MonthlyClimateSummary.query.filter_by(year=2026, month=10).count() == 0
 
 
 def test_consolidation_skips_incomplete_series_and_retries(client, monkeypatch):
@@ -580,6 +598,8 @@ def test_consolidation_skips_incomplete_series_and_retries(client, monkeypatch):
     from app.services import monthly_consolidation as mc
     ref = datetime(2026, 11, 7, 3, 0, tzinfo=timezone.utc)
     with client.application.app_context():
+        from app.models import Region
+        _seed_months([r.id for r in Region.query.all()], [(2026, 8), (2026, 9)])
         monkeypatch.setattr(mc, "fetch_month_daily", _fake_era5_october(missing_last_days=5))
         res = mc.consolidate_closed_month(reference_date=ref)
         assert res["incomplete_regions"] == 1
@@ -592,6 +612,48 @@ def test_consolidation_skips_incomplete_series_and_retries(client, monkeypatch):
         rec = MonthlyClimateSummary.query.filter_by(year=2026, month=10).one()
         assert rec.total_rain_mm == 62.0
         assert rec.rainy_days == 31
+
+
+def test_recent_closed_months_window():
+    """A janela cobre os 3 últimos meses fechados, inclusive na virada do ano."""
+    from app.services.monthly_consolidation import get_recent_closed_months
+    ref = datetime(2027, 2, 10, 3, 0, tzinfo=timezone.utc)
+    assert get_recent_closed_months(ref) == [(2026, 11), (2026, 12), (2027, 1)]
+
+
+def test_consolidation_catches_up_month_pending_at_rollover(client, monkeypatch):
+    """Região pendente em outubro quando o mês vira continua sendo tentada em dezembro."""
+    from app.models import MonthlyClimateSummary
+    from app.services import monthly_consolidation as mc
+    with client.application.app_context():
+        from app.models import Region
+        _seed_months([r.id for r in Region.query.all()], [(2026, 8), (2026, 9)])
+
+        # Novembro: outubro com ERA5 incompleto fica pendente.
+        monkeypatch.setattr(mc, "fetch_month_daily", _fake_era5_october(missing_last_days=5))
+        mc.consolidate_closed_month(reference_date=datetime(2026, 11, 7, 3, 0, tzinfo=timezone.utc))
+        assert MonthlyClimateSummary.query.filter_by(year=2026, month=10).count() == 0
+
+        # Dezembro: o alvo passa a ser novembro, mas outubro (agora completo) é recuperado.
+        monkeypatch.setattr(mc, "fetch_month_daily", _fake_era5(incomplete_months=()))
+        res = mc.consolidate_closed_month(reference_date=datetime(2026, 12, 7, 3, 0, tzinfo=timezone.utc))
+        assert (res["year"], res["month"]) == (2026, 11)
+        assert res["status"] == "success"
+        assert MonthlyClimateSummary.query.filter_by(year=2026, month=10).count() == 1
+        assert MonthlyClimateSummary.query.filter_by(year=2026, month=11).count() == 1
+
+
+def test_consolidation_window_makes_no_requests_without_gaps(client, monkeypatch):
+    """Com os 3 meses já consolidados, nenhuma requisição é feita à API."""
+    from app.services import monthly_consolidation as mc
+    calls = []
+    monkeypatch.setattr(mc, "fetch_month_daily", lambda *a: calls.append(a))
+    with client.application.app_context():
+        from app.models import Region
+        _seed_months([r.id for r in Region.query.all()], [(2026, 8), (2026, 9), (2026, 10)])
+        res = mc.consolidate_closed_month(reference_date=datetime(2026, 11, 7, 3, 0, tzinfo=timezone.utc))
+        assert res["status"] == "already_consolidated"
+        assert calls == []
 
 
 # ------------------------- Segurança (item 5) -------------------------
