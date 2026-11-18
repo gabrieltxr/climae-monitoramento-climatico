@@ -125,14 +125,15 @@ def init_scheduler(app):
                 id="database_pruning_job",
                 replace_existing=True,
             )
+            # Verificação diária (e não só no dia 1º): o ERA5 do mês fechado só fica
+            # completo ~5 dias depois; a checagem é idempotente e barata quando já consolidado.
             scheduler.add_job(
                 func=monthly_job,
                 trigger="cron",
-                day=1,
                 hour=3,
                 minute=0,
                 id="monthly_climate_consolidator",
                 replace_existing=True,
             )
             scheduler.start()
-            logger.info("APScheduler iniciado (coleta: %d min | purga: 24h | consolidação: mensal dia 1º).", interval_minutes)
+            logger.info("APScheduler iniciado (coleta: %d min | purga: 24h | consolidação mensal: verificação diária às 03h).", interval_minutes)

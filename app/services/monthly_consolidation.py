@@ -21,6 +21,10 @@ logger = logging.getLogger(__name__)
 
 ARCHIVE_URL = "https://archive-api.open-meteo.com/v1/archive"
 
+# A reanálise ERA5 é publicada com ~5 dias de atraso. Antes disso, os últimos dias
+# do mês fechado vêm como null na API e o mês seria consolidado incompleto.
+ERA5_LAG_DAYS = 6
+
 
 def get_closed_month(reference_date: datetime = None) -> tuple[int, int]:
     """Retorna o ano e mês do último mês completamente encerrado."""
@@ -31,6 +35,24 @@ def get_closed_month(reference_date: datetime = None) -> tuple[int, int]:
     return last_of_previous.year, last_of_previous.month
 
 
+def is_era5_available(year: int, month: int, reference_date: datetime = None) -> bool:
+    """O mês só pode ser consolidado depois de ERA5_LAG_DAYS dias após o seu último dia."""
+    if reference_date is None:
+        reference_date = datetime.now(timezone.utc)
+    _, last_day = calendar.monthrange(year, month)
+    last_date = datetime(year, month, last_day, tzinfo=timezone.utc).date()
+    return (reference_date.date() - last_date).days >= ERA5_LAG_DAYS
+
+
+def is_daily_series_complete(daily: dict, expected_days: int) -> bool:
+    """Exige todos os dias do mês com chuva e temperatura média preenchidas (sem null)."""
+    for key in ("precipitation_sum", "temperature_2m_mean"):
+        values = daily.get(key) or []
+        if len(values) < expected_days or any(v is None for v in values[:expected_days]):
+            return False
+    return True
+
+
 def is_month_consolidated(year: int, month: int) -> bool:
     """Verifica se o mês/ano especificado já está consolidado nas regiões cadastradas."""
     total_regions = Region.query.count()
@@ -38,8 +60,10 @@ def is_month_consolidated(year: int, month: int) -> bool:
         return True
 
     existing_count = MonthlyClimateSummary.query.filter_by(year=year, month=month).count()
-    # Considera consolidado se a vasta maioria das regiões já possui registro para aquele mês/ano
-    return existing_count >= int(total_regions * 0.9)
+    # Exige todas as regiões: com o limiar antigo de 90%, regiões com série ERA5 incompleta
+    # (puladas na consolidação) nunca seriam reprocessadas. A verificação é diária, então
+    # uma região pendente custa no máximo uma requisição por dia até completar.
+    return existing_count >= total_regions
 
 
 def fetch_month_daily(lat: float, lon: float, start_date: str, end_date: str) -> dict | None:
@@ -106,12 +130,26 @@ def recalculate_normal_for_month(region_id: int, month: int, now_utc: datetime):
     normal.updated_at = now_utc
 
 
-def consolidate_closed_month(force: bool = False) -> dict:
+def consolidate_closed_month(force: bool = False, reference_date: datetime = None) -> dict:
     """
     Executa a consolidação do mês encerrado caso ainda não esteja no banco.
+    Só grava regiões cuja série diária do mês está completa no ERA5.
     Retorna um dicionário com o status e a quantidade de regiões consolidadas.
     """
-    target_year, target_month = get_closed_month()
+    target_year, target_month = get_closed_month(reference_date)
+
+    if not is_era5_available(target_year, target_month, reference_date):
+        logger.info(
+            "[CONSOLIDATOR] ERA5 de %02d/%d ainda não publicado por completo (atraso de ~%d dias). Aguardando.",
+            target_month, target_year, ERA5_LAG_DAYS,
+        )
+        return {
+            "status": "awaiting_era5",
+            "year": target_year,
+            "month": target_month,
+            "updated_regions": 0,
+            "incomplete_regions": 0,
+        }
 
     if is_month_consolidated(target_year, target_month) and not force:
         logger.info("[CONSOLIDATOR] Mês %02d/%d já consolidado no histórico. Nenhuma ação necessária.", target_month, target_year)
@@ -119,7 +157,8 @@ def consolidate_closed_month(force: bool = False) -> dict:
             "status": "already_consolidated",
             "year": target_year,
             "month": target_month,
-            "updated_regions": 0
+            "updated_regions": 0,
+            "incomplete_regions": 0,
         }
 
     logger.info("[CONSOLIDATOR] Iniciando consolidação incremental para o mês fechado: %02d/%d...", target_month, target_year)
@@ -132,6 +171,7 @@ def consolidate_closed_month(force: bool = False) -> dict:
     regions = Region.query.order_by(Region.municipality, Region.name).all()
     now_utc = datetime.now(timezone.utc)
     updated_count = 0
+    incomplete_count = 0
 
     # Agrupa por coordenadas arredondadas (células de grade ERA5) para evitar requisições repetidas
     grid_cache = {}
@@ -154,6 +194,12 @@ def consolidate_closed_month(force: bool = False) -> dict:
                 grid_cache[grid_key] = daily
 
         if not daily:
+            continue
+
+        # Série com dias faltando (null) não é gravada: a região fica pendente e é
+        # reprocessada na próxima verificação, em vez de ficar consolidada incompleta.
+        if not is_daily_series_complete(daily, last_day):
+            incomplete_count += 1
             continue
 
         # Agrega os 30-31 dias do mês
@@ -192,10 +238,16 @@ def consolidate_closed_month(force: bool = False) -> dict:
     if updated_count > 0:
         db.session.commit()
         logger.info("[CONSOLIDATOR] Sucesso! Mês %02d/%d consolidado para %d regiões.", target_month, target_year, updated_count)
+    if incomplete_count > 0:
+        logger.warning(
+            "[CONSOLIDATOR] %d regiões com série ERA5 incompleta em %02d/%d; serão reprocessadas na próxima verificação.",
+            incomplete_count, target_month, target_year,
+        )
 
     return {
         "status": "success",
         "year": target_year,
         "month": target_month,
-        "updated_regions": updated_count
+        "updated_regions": updated_count,
+        "incomplete_regions": incomplete_count,
     }
