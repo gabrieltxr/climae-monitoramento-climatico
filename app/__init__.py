@@ -1,5 +1,7 @@
+import os
 import sqlite3
 from flask import Flask
+from werkzeug.middleware.proxy_fix import ProxyFix
 from flask_migrate import Migrate
 from sqlalchemy import event
 from sqlalchemy.engine import Engine
@@ -34,6 +36,11 @@ def create_app(config_class=Config):
     migrate.init_app(app, db)
 
     app.register_blueprint(main_bp)
+
+    # Só confia em X-Forwarded-For quando há proxy reverso declarado (ex.: Nginx = 1).
+    trusted_proxies = int(os.getenv("TRUSTED_PROXY_COUNT", "0") or 0)
+    if trusted_proxies > 0:
+        app.wsgi_app = ProxyFix(app.wsgi_app, x_for=trusted_proxies)
 
     # O agendador NÃO é iniciado aqui: create_app() também é usado por scripts,
     # testes e pelo preflight. Ele é iniciado explicitamente em run.py.

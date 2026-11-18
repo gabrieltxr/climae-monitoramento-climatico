@@ -279,8 +279,8 @@ def test_power_outage_crowdsourcing_api(client):
         assert "cooldown_remaining" in dup_data
 
         # 4. Simula relatos de outros 2 IPs diferentes para atingir >= 3 relatos
-        client.post("/api/power/report", json={"region_id": reg.id}, headers={"X-Forwarded-For": "192.168.1.10"})
-        res_3 = client.post("/api/power/report", json={"region_id": reg.id}, headers={"X-Forwarded-For": "192.168.1.20"})
+        client.post("/api/power/report", json={"region_id": reg.id}, environ_base={"REMOTE_ADDR": "192.168.1.10"})
+        res_3 = client.post("/api/power/report", json={"region_id": reg.id}, environ_base={"REMOTE_ADDR": "192.168.1.20"})
         assert res_3.status_code == 200
         data_3 = res_3.get_json()
         assert data_3["reports_30m"] >= 3
@@ -317,7 +317,7 @@ def test_power_restoration_crowdsourcing_api(client):
         res_new_outage = client.post(
             "/api/power/report",
             json={"region_id": reg.id, "comment": "Caiu novamente agora"},
-            headers={"X-Forwarded-For": "10.0.0.50"}
+            environ_base={"REMOTE_ADDR": "10.0.0.50"}
         )
         assert res_new_outage.status_code == 200
         assert res_new_outage.get_json()["status"] == "investigating"
@@ -373,7 +373,7 @@ def test_power_telemetry_probes_and_consensus(client):
         res_corr = client.post(
             "/api/power/report",
             json={"region_id": reg.id, "comment": "Confirmando que caiu a energia no bairro"},
-            headers={"X-Forwarded-For": "172.16.0.99"}
+            environ_base={"REMOTE_ADDR": "172.16.0.99"}
         )
         assert res_corr.status_code == 200
         corr_data = res_corr.get_json()
@@ -386,8 +386,9 @@ def test_power_telemetry_probes_and_consensus(client):
         assert "total_probes" in res_probes_api.get_json()
 
 
-def test_power_official_bulletins_api(client):
+def test_power_official_bulletins_api(client, monkeypatch):
     """Valida a ingestão, consulta e impacto de notas oficiais da concessionária e Defesa Civil (Fase 3)."""
+    monkeypatch.setenv("ADMIN_API_TOKEN", "token-de-teste")
     with client.application.app_context():
         reg = Region.query.first()  # municipality = "Rio Grande"
         assert reg is not None
@@ -402,7 +403,8 @@ def test_power_official_bulletins_api(client):
             "severity": "critico",
             "status": "ativo"
         }
-        res_post = client.post("/api/power/bulletins", json=bulletin_payload)
+        res_post = client.post("/api/power/bulletins", json=bulletin_payload,
+                               headers={"X-Admin-Token": "token-de-teste"})
         assert res_post.status_code == 201
         post_data = res_post.get_json()
         assert post_data["success"] is True
@@ -590,3 +592,75 @@ def test_consolidation_skips_incomplete_series_and_retries(client, monkeypatch):
         rec = MonthlyClimateSummary.query.filter_by(year=2026, month=10).one()
         assert rec.total_rain_mm == 62.0
         assert rec.rainy_days == 31
+
+
+# ------------------------- Segurança (item 5) -------------------------
+
+def test_run_server_settings_never_expose_debugger():
+    """Padrão local com debug; exposto na rede, o debugger é sempre desligado."""
+    from run import resolve_server_settings
+    assert resolve_server_settings({}) == ("127.0.0.1", 5000, True)
+    assert resolve_server_settings({"CLIMAE_HOST": "0.0.0.0"}) == ("0.0.0.0", 5000, False)
+    assert resolve_server_settings({"CLIMAE_HOST": "0.0.0.0", "FLASK_DEBUG": "1"})[2] is False
+    assert resolve_server_settings({"FLASK_DEBUG": "0"})[2] is False
+    assert resolve_server_settings({"CLIMAE_PORT": "8080"})[1] == 8080
+
+
+def test_bulletin_post_requires_admin_token(client, monkeypatch):
+    """Boletins 'oficiais' só podem ser criados com o token administrativo correto."""
+    from app.models import PowerUtilityBulletin
+    payload = {"municipality": "Rio Grande", "headline": "Falso", "body": "Falso",
+               "source": "CEEE Grupo Equatorial", "affected_customers": 9999}
+
+    monkeypatch.delenv("ADMIN_API_TOKEN", raising=False)
+    assert client.post("/api/power/bulletins", json=payload).status_code == 403
+    assert client.post("/api/power/bulletins", json=payload,
+                       headers={"X-Admin-Token": ""}).status_code == 403
+
+    monkeypatch.setenv("ADMIN_API_TOKEN", "segredo")
+    assert client.post("/api/power/bulletins", json=payload).status_code == 403
+    assert client.post("/api/power/bulletins", json=payload,
+                       headers={"X-Admin-Token": "errado"}).status_code == 403
+    with client.application.app_context():
+        assert PowerUtilityBulletin.query.count() == 0
+
+    assert client.post("/api/power/bulletins", json=payload,
+                       headers={"X-Admin-Token": "segredo"}).status_code == 201
+
+
+def test_power_cooldown_ignores_spoofed_forwarded_for(client):
+    """Forjar X-Forwarded-For não cria 'novos moradores' para burlar o cooldown."""
+    with client.application.app_context():
+        reg_id = Region.query.first().id
+    first = client.post("/api/power/report", json={"region_id": reg_id})
+    assert first.status_code == 200
+    for fake_ip in ("1.2.3.4", "5.6.7.8"):
+        res = client.post("/api/power/report", json={"region_id": reg_id},
+                          headers={"X-Forwarded-For": fake_ip})
+        assert res.status_code == 429
+    status = client.get(f"/api/power/status/{reg_id}").get_json()
+    assert status["reports_30m"] == 1
+    assert status["status"] != "outage_reported"
+
+
+def test_alerts_pagination_is_bounded(client):
+    """per_page é limitado e page inválido não quebra a API."""
+    data = client.get("/api/alerts?per_page=1000000&page=-3").get_json()
+    assert data["current_page"] == 1
+    from app.routes.main import MAX_PER_PAGE
+    with client.application.app_context():
+        reg = Region.query.first()
+        now = datetime.now(timezone.utc)
+        for i in range(MAX_PER_PAGE + 10):
+            db.session.add(Alert(region_id=reg.id, triggered_rule="r", created_at=now,
+                                 channel="painel", status="ok", dedup_key=f"k{i}"))
+        db.session.commit()
+    data = client.get("/api/alerts?per_page=1000000").get_json()
+    assert len(data["alerts"]) == MAX_PER_PAGE
+
+
+def test_occurrences_invalid_dates_return_400(client):
+    """Datas malformadas retornam 400 com mensagem, e não erro 500."""
+    assert client.get("/api/occurrences?start_date=2026-13-45").status_code == 400
+    assert client.get("/api/occurrences?end_date=ontem").status_code == 400
+    assert client.get("/api/occurrences?start_date=2026-01-01&end_date=2026-01-31").status_code == 200

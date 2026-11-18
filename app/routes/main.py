@@ -1,3 +1,5 @@
+import hmac
+import os
 from datetime import datetime, timezone, timedelta
 from flask import Blueprint, render_template, jsonify, request
 from app.models import db, Region, WeatherObservation, Occurrence, RiskAssessment, Alert, TrafficEvent, MonthlyClimateSummary
@@ -5,6 +7,8 @@ from app.services.risk_engine import calculate_region_risk
 from app.collectors.traffic_collector import get_traffic_panel_data, update_highway_conditions
 
 main_bp = Blueprint('main', __name__)
+
+MAX_PER_PAGE = 50
 
 @main_bp.route('/')
 def index():
@@ -166,13 +170,20 @@ def api_occurrences():
 
     query = Occurrence.query.join(Region)
 
+    try:
+        dt_start = datetime.fromisoformat(start_date).replace(tzinfo=timezone.utc) if start_date else None
+        dt_end = (
+            datetime.fromisoformat(end_date).replace(hour=23, minute=59, second=59, tzinfo=timezone.utc)
+            if end_date else None
+        )
+    except ValueError:
+        return jsonify({"error": "Datas inválidas. Use o formato AAAA-MM-DD."}), 400
+
     if region_id:
         query = query.filter(Occurrence.region_id == region_id)
-    if start_date:
-        dt_start = datetime.fromisoformat(start_date).replace(tzinfo=timezone.utc)
+    if dt_start:
         query = query.filter(Occurrence.occurred_at >= dt_start)
-    if end_date:
-        dt_end = datetime.fromisoformat(end_date).replace(hour=23, minute=59, second=59, tzinfo=timezone.utc)
+    if dt_end:
         query = query.filter(Occurrence.occurred_at <= dt_end)
 
     items = query.order_by(Occurrence.occurred_at.desc()).all()
@@ -245,8 +256,9 @@ def api_traffic_check():
 
 @main_bp.route("/api/alerts", methods=["GET"])
 def get_alerts():
-    page = request.args.get("page", 1, type=int)
-    per_page = request.args.get("per_page", 5, type=int)
+    # Limites evitam que um único pedido (ex.: per_page=1000000) carregue a tabela inteira
+    page = max(1, request.args.get("page", 1, type=int) or 1)
+    per_page = min(MAX_PER_PAGE, max(1, request.args.get("per_page", 5, type=int) or 5))
 
     # Consulta paginada, ordenada do mais recente para o mais antigo
     pagination = Alert.query.order_by(Alert.id.desc()).paginate(
@@ -475,15 +487,27 @@ def api_power_bulletins():
     from app.services.power_service import get_utility_bulletins
     municipality = request.args.get('municipality')
     status = request.args.get('status')
-    limit = request.args.get('limit', 10, type=int)
+    limit = min(MAX_PER_PAGE, max(1, request.args.get('limit', 10, type=int) or 10))
     bulletins = get_utility_bulletins(municipality=municipality, status=status, limit=limit)
     return jsonify(bulletins)
 
 
+def _is_admin_request() -> bool:
+    """
+    Valida o token administrativo (header X-Admin-Token) contra ADMIN_API_TOKEN.
+    Sem token configurado no ambiente, nenhuma requisição é aceita.
+    """
+    expected = os.getenv("ADMIN_API_TOKEN", "").strip()
+    provided = request.headers.get("X-Admin-Token", "").strip()
+    return bool(expected) and hmac.compare_digest(provided.encode(), expected.encode())
+
+
 @main_bp.route('/api/power/bulletins', methods=['POST'])
 def api_power_create_bulletin():
-    """Registra uma nova nota ou comunicado oficial de contingência."""
+    """Registra uma nova nota ou comunicado oficial de contingência (somente administradores)."""
     from app.services.power_service import record_utility_bulletin
+    if not _is_admin_request():
+        return jsonify({"success": False, "error": "Não autorizado."}), 403
     data = request.get_json() or {}
     res = record_utility_bulletin(data)
     status_code = 201 if res.get("success") else 400
