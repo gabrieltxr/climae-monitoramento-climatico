@@ -210,6 +210,9 @@ class PowerRestorationReport(db.Model):
 class PowerGridProbe(db.Model):
     """
     Sondas de conectividade virtual de rede (Nós multi-operadora / gateways públicos).
+    SEM USO: as sondas testavam DNS públicos a partir do servidor (iguais para todas as
+    regiões) e não mediam a energia do bairro. A classe fica só para manter a tabela
+    existente até haver migrações (pasta migrations/).
     Permite avaliar a disponibilidade da infraestrutura elétrica através do monitoramento de nós de rede,
     distinguindo quedas gerais de energia de simples rompimentos de fibra ótica de uma única operadora.
     """
@@ -278,3 +281,28 @@ class PowerUtilityBulletin(db.Model):
         }
 
 
+
+
+class StationObservation(db.Model):
+    """
+    Medições horárias das estações automáticas do INMET (dado medido, não estimativa).
+    Fica separada de WeatherObservation, que guarda as estimativas e previsões dos modelos.
+    Dados brutos do INMET: não passam por controle de consistência.
+    """
+    __tablename__ = 'station_observations'
+
+    id = db.Column(db.Integer, primary_key=True)
+    station_code = db.Column(db.String(10), nullable=False)             # Ex: "A887"
+    observed_at = db.Column(db.DateTime(timezone=True), nullable=False) # Fim da hora medida, em UTC
+    collected_at = db.Column(db.DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    temperature_c = db.Column(db.Float, nullable=True)
+    humidity_percent = db.Column(db.Float, nullable=True)
+    precipitation_mm = db.Column(db.Float, nullable=True)               # Chuva acumulada na hora
+    wind_speed_kmh = db.Column(db.Float, nullable=True)
+    wind_gust_kmh = db.Column(db.Float, nullable=True)
+    wind_direction = db.Column(db.Float, nullable=True)
+    pressure_hpa = db.Column(db.Float, nullable=True)
+
+    __table_args__ = (
+        db.UniqueConstraint('station_code', 'observed_at', name='uq_station_observed_at'),
+    )

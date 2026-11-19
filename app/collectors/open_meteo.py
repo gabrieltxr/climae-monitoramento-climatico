@@ -191,7 +191,11 @@ def save_region_weather(region: Region, data: dict) -> dict:
     current_hour_floor = now_utc.replace(minute=0, second=0, microsecond=0)
     current_hour_key = now_utc.strftime("%Y-%m-%dT%H:00")
 
-    source_label = "Consenso Multi-Modelo (ECMWF + GFS + ICON)"
+    # Nada aqui é medição de estação: tudo vem da API de previsão (saída de modelo).
+    # "is_forecast=False" marca só o tempo (agora / horas passadas); o rótulo diz a natureza.
+    source_now = "Estimativa atual do modelo (ECMWF + GFS + ICON)"
+    source_past = "Estimativa do modelo para horas passadas (ECMWF + GFS + ICON)"
+    source_forecast = "Previsão multi-modelo (ECMWF + GFS + ICON)"
 
     hourly = data.get("hourly", {})
     times = hourly.get("time", [])
@@ -203,7 +207,7 @@ def save_region_weather(region: Region, data: dict) -> dict:
     precip_series = _extract_model_series(hourly, "precipitation")
     prob_series = _extract_model_series(hourly, "precipitation_probability")
 
-    # 1. Processar dado OBSERVADO atual (is_forecast = False)
+    # 1. Estimativa do modelo para o momento atual (is_forecast = False)
     current = data.get("current", {})
     if current and "time" in current:
         obs_time = _parse_utc_iso(current["time"])
@@ -214,10 +218,11 @@ def save_region_weather(region: Region, data: dict) -> dict:
         wind_dir_final = _extract_current_direction(current, "wind_direction_10m", "wind_speed_10m")
         wmo_code = _extract_current_value(current, "weather_code", "max")
 
-        cur_precip = _extract_current_value(current, "precipitation", "max") or 0.0
-        cur_rain = _extract_current_value(current, "rain", "max") or 0.0
-        cur_showers = _extract_current_value(current, "showers", "max") or 0.0
-        rain_final = max(cur_precip, cur_rain, cur_showers)
+        # Mesma mistura entre modelos das demais horas (_consensus_rain_at_index), em vez do
+        # maior valor entre os modelos, que inflava a chuva "atual". "rain" e "showers" já
+        # estão contidos em "precipitation" e não entram de novo.
+        cur_precip_by_model = [[current.get(f"precipitation{suffix}")] for suffix in MODEL_SUFFIXES]
+        rain_final = _consensus_rain_at_index(cur_precip_by_model, 0)
 
         if current_hour_key in times:
             idx_now = times.index(current_hour_key)
@@ -243,7 +248,7 @@ def save_region_weather(region: Region, data: dict) -> dict:
             existing_obs.precipitation_mm = round(rain_final, 2)
             existing_obs.wind_speed = wind_final
             existing_obs.wind_direction = wind_dir_final
-            existing_obs.source = source_label
+            existing_obs.source = source_now
             existing_obs.collected_at = now_utc
             updated += 1
         else:
@@ -258,7 +263,7 @@ def save_region_weather(region: Region, data: dict) -> dict:
                 rain_probability=None,
                 wind_speed=wind_final,
                 wind_direction=wind_dir_final,
-                source=source_label,
+                source=source_now,
             )
             db.session.add(new_obs)
             inserted += 1
@@ -293,7 +298,7 @@ def save_region_weather(region: Region, data: dict) -> dict:
                     rain_probability=None,
                     wind_speed=fc_wind,
                     wind_direction=fc_wind_dir,
-                    source=source_label,
+                    source=source_past,
                 )
                 db.session.add(past_obs)
                 inserted += 1
@@ -319,7 +324,7 @@ def save_region_weather(region: Region, data: dict) -> dict:
             existing_fc.precipitation_mm = fc_rain
             existing_fc.wind_speed = fc_wind
             existing_fc.wind_direction = fc_wind_dir
-            existing_fc.source = source_label
+            existing_fc.source = source_forecast
             existing_fc.collected_at = now_utc
             updated += 1
         else:
@@ -334,7 +339,7 @@ def save_region_weather(region: Region, data: dict) -> dict:
                 precipitation_mm=fc_rain,
                 wind_speed=fc_wind,
                 wind_direction=fc_wind_dir,
-                source=source_label,
+                source=source_forecast,
             )
             db.session.add(new_fc)
             inserted += 1

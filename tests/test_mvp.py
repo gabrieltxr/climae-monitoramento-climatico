@@ -343,67 +343,32 @@ def test_power_restoration_crowdsourcing_api(client):
         assert res_new_outage.get_json()["status"] == "investigating"
 
 
-def test_power_telemetry_probes_and_consensus(client):
-    """Valida a telemetria por sondas virtuais e o algoritmo de consenso multi-operadora da Fase 2."""
+def test_power_status_ignores_legacy_probes(client):
+    """Sondas antigas (DNS públicos testados do servidor) não influenciam mais o status."""
     from app.models import PowerGridProbe
-    from app.services.power_service import seed_default_probes_if_empty, evaluate_region_probes, get_power_status
+    from app.services.power_service import get_power_status
 
     with client.application.app_context():
         reg = Region.query.first()
-        assert reg is not None
-
-        # 1. Popula sondas padrão multi-operadora para a região de teste
-        seed_default_probes_if_empty()
-        probes = PowerGridProbe.query.filter_by(region_id=reg.id).all()
-        assert len(probes) >= 3
-
-        # 2. Avaliação inicial -> todas saudáveis (healthy)
-        eval_healthy = evaluate_region_probes(reg.id)
-        assert eval_healthy["status"] == "healthy"
-        assert eval_healthy["up_probes"] == len(probes)
-
-        # 3. Simula falha isolada de 1 operadora (ex: Claro cai, Vivo e RNP continuam up)
-        # Filtro Anti-Falso Positivo: NÃO deve acusar blackout elétrico
-        for p in probes:
-            if p.provider_name == "Claro":
-                p.is_up = False
+        # Linhas que ficaram no banco de instalações antigas, todas "offline".
+        for provider, host in (("Claro", "1.1.1.1"), ("Vivo", "8.8.8.8"), ("RNP / Regional", "9.9.9.9")):
+            db.session.add(PowerGridProbe(region_id=reg.id, name=provider, target_host=host,
+                                          target_port=53, provider_name=provider, is_up=False))
         db.session.commit()
 
-        eval_telecom = evaluate_region_probes(reg.id)
-        assert eval_telecom["status"] == "telecom_instability"
-        assert "Claro" in eval_telecom["providers_down"]
+        status = get_power_status(reg.id)
+        assert status["status"] == "stable"
+        assert "telemetry" not in status
 
-        status_telecom = get_power_status(reg.id)
-        assert status_telecom["status"] == "stable"
-        assert "Instabilidade de dados" in status_telecom["label"]
+        # 1 relato isolado continua sendo só "investigando" (antes, com sondas offline, virava "confirmada").
+        res = client.post("/api/power/report", json={"region_id": reg.id},
+                          environ_base={"REMOTE_ADDR": "172.16.0.99"})
+        assert res.status_code == 200
+        assert res.get_json()["status"] == "investigating"
 
-        # 4. Simula queda simultânea de TODAS as operadoras (Blackout Suspected)
-        for p in probes:
-            p.is_up = False
-        db.session.commit()
-
-        eval_blackout = evaluate_region_probes(reg.id)
-        assert eval_blackout["status"] == "blackout_suspected"
-
-        status_blackout = get_power_status(reg.id)
-        assert status_blackout["status"] == "blackout_suspected"
-        assert "Suspeita Técnica" in status_blackout["label"]
-
-        # 5. Correlaciona: Suspeita Técnica + 1 relato de morador -> eleva imediatamente para 'outage_reported'
-        res_corr = client.post(
-            "/api/power/report",
-            json={"region_id": reg.id, "comment": "Confirmando que caiu a energia no bairro"},
-            environ_base={"REMOTE_ADDR": "172.16.0.99"}
-        )
-        assert res_corr.status_code == 200
-        corr_data = res_corr.get_json()
-        assert corr_data["status"] == "outage_reported"
-        assert "Sondas Offline" in corr_data["label"]
-
-        # 6. Validação das rotas de API da Fase 2
-        res_probes_api = client.get(f"/api/power/probes/{reg.id}")
-        assert res_probes_api.status_code == 200
-        assert "total_probes" in res_probes_api.get_json()
+    # As rotas das sondas não existem mais.
+    assert client.get(f"/api/power/probes/{reg.id}").status_code == 404
+    assert client.post(f"/api/power/probes/check/{reg.id}").status_code in (404, 405)
 
 
 def test_power_official_bulletins_api(client, monkeypatch):
@@ -553,6 +518,37 @@ def test_collector_saves_circular_wind_direction(client):
         assert obs.wind_direction == 0.0
         assert len(fcs) == 3
         assert all(f.wind_direction == 0.0 for f in fcs)
+
+
+def test_collector_current_rain_blends_models_and_labels_estimates(client):
+    """Chuva 'atual' usa a mistura entre modelos (não o maior valor) e os rótulos dizem que é modelo."""
+    from datetime import timedelta
+    from app.collectors.open_meteo import save_region_weather
+    hour = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0)
+    past = (hour - timedelta(hours=2)).strftime("%Y-%m-%dT%H:00")
+    future = (hour + timedelta(hours=2)).strftime("%Y-%m-%dT%H:00")
+    hourly = {"time": [past, future], "precipitation_best_match": [0.0, 0.0]}
+    # Só um modelo vê 10 mm agora: antes gravava 10 (máximo); a mistura dá 10 × 0,8 = 8.
+    current = {
+        "time": hour.strftime("%Y-%m-%dT%H:00"),
+        "precipitation_best_match": 10.0,
+        "precipitation_ecmwf_ifs025": 0.0,
+        "precipitation_gfs_seamless": 0.0,
+        "rain_best_match": 10.0,
+        "showers_gfs_seamless": 12.0,
+    }
+    with client.application.app_context():
+        reg = Region.query.first()
+        save_region_weather(reg, {"current": current, "hourly": hourly})
+        now_obs = WeatherObservation.query.filter_by(region_id=reg.id, is_forecast=False, observed_at=hour).one()
+        assert now_obs.precipitation_mm == 8.0
+        assert now_obs.source.startswith("Estimativa atual do modelo")
+        past_obs = WeatherObservation.query.filter(
+            WeatherObservation.region_id == reg.id, WeatherObservation.is_forecast.is_(False),
+            WeatherObservation.observed_at < hour).one()
+        assert past_obs.source.startswith("Estimativa do modelo para horas passadas")
+        fc = WeatherObservation.query.filter_by(region_id=reg.id, is_forecast=True).one()
+        assert fc.source.startswith("Previsão multi-modelo")
 
 
 def _fake_era5(missing_last_days: int = 0, incomplete_months: tuple = ("2026-10",)):
@@ -809,15 +805,16 @@ def test_power_posts_have_global_ip_limit(client):
     from app.services import power_service
     with client.application.app_context():
         reg_id = Region.query.first().id
+    # Requisições inválidas (400) também contam no limite geral.
     for _ in range(power_service.POWER_POST_LIMIT):
-        assert client.post(f"/api/power/probes/check/{reg_id}").status_code == 200
-    blocked = client.post(f"/api/power/probes/check/{reg_id}")
+        assert client.post("/api/power/report", json={}).status_code == 400
+    blocked = client.post("/api/power/report", json={"region_id": reg_id})
     assert blocked.status_code == 429
     assert "Muitas requisições" in blocked.get_json()["error"]
-    assert client.post("/api/power/report", json={"region_id": reg_id}).status_code == 429
+    assert client.post("/api/power/restore", json={"region_id": reg_id}).status_code == 429
     assert client.get(f"/api/power/status/{reg_id}").status_code == 200
     # Outro IP não é afetado; boletins (com token de admin) ficam fora do limite.
-    assert client.post(f"/api/power/probes/check/{reg_id}",
+    assert client.post("/api/power/report", json={"region_id": reg_id},
                        environ_base={"REMOTE_ADDR": "10.2.0.1"}).status_code == 200
     assert client.post("/api/power/bulletins", json={}).status_code == 403
 
@@ -885,12 +882,10 @@ def test_occurrences_invalid_dates_return_400(client):
 def _stub_scheduler_startup_io(monkeypatch):
     """Evita rede nas rotinas que o agendador executa ao iniciar."""
     import app.scheduler as sched_mod
-    import app.services.power_service as power_mod
     monkeypatch.delenv("DISABLE_SCHEDULER", raising=False)
     monkeypatch.delenv("WERKZEUG_RUN_MAIN", raising=False)
     monkeypatch.setattr(sched_mod, "run_scheduled_cycle", lambda app: None)
     monkeypatch.setattr(sched_mod, "consolidate_closed_month", lambda *a, **k: None)
-    monkeypatch.setattr(power_mod, "seed_default_probes_if_empty", lambda: None)
 
 
 def test_run_scheduler_script_starts_even_with_debug_env(monkeypatch):
@@ -1129,3 +1124,135 @@ def test_seed_does_not_save_partial_month(client):
         saved = {(r.year, r.month) for r in MonthlyClimateSummary.query.filter(
             MonthlyClimateSummary.region_id == region.id, MonthlyClimateSummary.year > 0)}
         assert saved == {(2026, 9)}
+
+
+# --- Estações INMET (medição real) ---
+
+def _inmet_row(dt, chuva="0.0", vel="2.0", tem="20.1"):
+    return {
+        "DT_MEDICAO": dt.strftime("%Y-%m-%d"), "HR_MEDICAO": dt.strftime("%H00"),
+        "CHUVA": chuva, "TEM_INS": tem, "UMD_INS": "80", "VEN_VEL": vel,
+        "VEN_RAJ": "5.0", "VEN_DIR": "180", "PRE_INS": "1012.3", "CD_ESTACAO": "A802",
+    }
+
+
+def test_inmet_parse_row_converts_units_and_skips_empty():
+    from app.collectors.inmet import parse_inmet_row
+    row = parse_inmet_row({"DT_MEDICAO": "2026-11-19", "HR_MEDICAO": "1300", "CHUVA": "1.2",
+                           "TEM_INS": "25.4", "VEN_VEL": "10", "VEN_RAJ": None, "UMD_INS": "-9999"})
+    assert row["observed_at"] == datetime(2026, 11, 19, 13, tzinfo=timezone.utc)
+    assert row["precipitation_mm"] == 1.2
+    assert row["wind_speed_kmh"] == 36.0
+    assert row["wind_gust_kmh"] is None
+    assert row["humidity_percent"] is None
+    assert parse_inmet_row({"DT_MEDICAO": "2026-11-19", "HR_MEDICAO": "1300"}) is None
+    assert parse_inmet_row({"DT_MEDICAO": "", "HR_MEDICAO": "1300", "CHUVA": "1"}) is None
+
+
+def test_inmet_collect_without_token_does_nothing(client, monkeypatch):
+    from app.collectors import inmet
+    monkeypatch.delenv("INMET_TOKEN", raising=False)
+
+    def boom(*a, **k):
+        raise AssertionError("não deveria chamar a API sem token")
+    monkeypatch.setattr(inmet.http_session, "get", boom)
+    assert inmet.collect_inmet_stations()["status"] == "sem_token"
+
+
+def test_inmet_collect_saves_rows_and_upserts(client, monkeypatch):
+    from app.collectors import inmet
+    from app.models import StationObservation
+    monkeypatch.setenv("INMET_TOKEN", "tok-teste")
+    monkeypatch.delenv("INMET_URL_TEMPLATE", raising=False)
+    now = datetime(2026, 11, 19, 15, tzinfo=timezone.utc)
+    urls = []
+
+    class Resp:
+        def __init__(self, code, payload=None):
+            self.status_code, self._payload = code, payload
+        def json(self):
+            return self._payload
+
+    def fake_get(url, timeout=None):
+        urls.append(url)
+        if "/A802/" in url:
+            return Resp(200, [_inmet_row(datetime(2026, 11, 19, 14)), _inmet_row(datetime(2026, 11, 19, 15))])
+        if "/A887/" in url:
+            return Resp(500)
+        return Resp(204)
+    monkeypatch.setattr(inmet.http_session, "get", fake_get)
+
+    first = inmet.collect_inmet_stations(now=now)
+    assert first["inserted"] == 2 and first["failed"] == ["A887"]
+    assert "/2026-11-18/2026-11-19/A802/tok-teste" in urls[0]
+    second = inmet.collect_inmet_stations(now=now)
+    assert second["inserted"] == 0 and second["updated"] == 2
+    assert StationObservation.query.count() == 2
+
+
+def test_inmet_region_summary_uses_nearest_publishing_station(client):
+    from datetime import timedelta
+    from app.collectors.inmet import get_region_station_summary, save_station_rows
+    now = datetime(2026, 11, 19, 15, 20, tzinfo=timezone.utc)
+    base = now.replace(minute=0)
+    region = Region.query.first()  # Rio Grande Centro: A802 a ~6 km
+    assert get_region_station_summary(region, now=now) is None
+
+    # Leitura velha (5h atrás) na A802 = estação parada; sem outra no raio de 30 km.
+    save_station_rows("A802", [_inmet_row(base - timedelta(hours=5))])
+    assert get_region_station_summary(region, now=now) is None
+
+    save_station_rows("A802", [_inmet_row(base - timedelta(hours=h), chuva="2.5", vel="5") for h in range(10)])
+    summary = get_region_station_summary(region, now=now)
+    assert summary["code"] == "A802" and summary["distance_km"] < 10
+    assert summary["hours_12h"] == 10
+    assert summary["rain_12h_mm"] == 25.0
+    assert summary["peak_wind_12h_kmh"] == 18.0
+
+    far = Region(municipality="Chuí", name="Teste longe", latitude=-33.20, longitude=-52.40)
+    db.session.add(far)
+    db.session.commit()
+    assert get_region_station_summary(far, now=now) is None
+
+
+def test_inmet_window_needs_nine_hours(client):
+    from datetime import timedelta
+    from app.collectors.inmet import get_region_station_summary, save_station_rows
+    now = datetime(2026, 11, 19, 15, 20, tzinfo=timezone.utc)
+    base = now.replace(minute=0)
+    save_station_rows("A802", [_inmet_row(base - timedelta(hours=h), chuva="9") for h in range(4)])
+    summary = get_region_station_summary(Region.query.first(), now=now)
+    assert summary["temperature_c"] == 20.1
+    assert summary["rain_12h_mm"] is None and summary["peak_wind_12h_kmh"] is None
+
+
+def test_alert_uses_measured_station_rain(client):
+    from datetime import timedelta
+    from app.collectors.inmet import save_station_rows
+    now = datetime.now(timezone.utc)
+    base = now.replace(minute=0, second=0, microsecond=0)
+    region = Region.query.first()
+    # Modelo estima 0 mm no passado; a estação mediu 3 mm/h por 10 horas = 30 mm.
+    db.session.add(WeatherObservation(region_id=region.id, observed_at=base - timedelta(hours=1),
+                                      is_forecast=False, precipitation_mm=0.0, wind_speed=5.0, source="modelo"))
+    db.session.commit()
+    save_station_rows("A802", [_inmet_row(base - timedelta(hours=h), chuva="3.0") for h in range(10)])
+
+    alerts = evaluate_region_alerts(region)
+    rain = [a for a in alerts if "CHUVA_INTENSA_24H" in a.dedup_key]
+    assert rain, "alerta de chuva deveria disparar com a medição da estação"
+    assert "medida na estação INMET A802" in rain[0].triggered_rule
+    assert len(rain[0].triggered_rule) <= 100
+
+
+def test_weather_api_exposes_station(client):
+    from datetime import timedelta
+    from app.collectors.inmet import save_station_rows
+    base = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0)
+    region_id = Region.query.first().id
+    assert client.get(f"/api/weather/{region_id}").get_json()["station"] is None
+    save_station_rows("A802", [_inmet_row(base - timedelta(hours=1))])
+    station = client.get(f"/api/weather/{region_id}").get_json()["station"]
+    assert station["code"] == "A802"
+    assert station["observed_at"].endswith("+00:00")
+    assert station["rain_12h_mm"] is None

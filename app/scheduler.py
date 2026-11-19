@@ -4,6 +4,7 @@ from datetime import datetime, timedelta, timezone
 from apscheduler.schedulers.background import BackgroundScheduler
 from app.collectors.open_meteo import collect_all_regions
 from app.collectors.traffic_collector import update_highway_conditions
+from app.collectors.inmet import collect_inmet_stations
 from app.services.alert_engine import run_alert_engine, evaluate_and_record_alerts
 from app.services.pruning_service import prune_expired_data
 from app.services.monthly_consolidation import consolidate_closed_month
@@ -17,7 +18,7 @@ def run_scheduled_cycle(app):
     """
     Executa o ciclo periódico completo na ordem lógica:
     1. Coleta meteorológica Open-Meteo
-    2. Atualização de telemetria dos corredores de tráfego
+    2. Atualização de telemetria dos corredores de tráfego (+ medições INMET, se houver token)
     3. Avaliação de risco e geração de alertas (incorporando clima + rodovias)
     """
     with app.app_context():
@@ -29,6 +30,13 @@ def run_scheduled_cycle(app):
             print("[SCHEDULER] 2. Atualizando telemetria dos 7 corredores de tráfego...")
             logger.info("[SCHEDULER] 2. Atualizando telemetria dos 7 corredores de tráfego...")
             update_highway_conditions()
+
+            # Medições INMET antes dos alertas: as últimas 12h passam a usar o dado medido.
+            # Falha aqui não pode derrubar o ciclo (sem token, a função só retorna).
+            try:
+                collect_inmet_stations()
+            except Exception as e:
+                logger.error("[SCHEDULER] Falha na coleta INMET: %s", e)
 
             print("[SCHEDULER] 3. Avaliando índices de risco e gerando alertas...")
             logger.info("[SCHEDULER] 3. Avaliando índices de risco e gerando alertas...")
@@ -74,15 +82,6 @@ def init_scheduler(app):
                 consolidate_closed_month()
             except Exception as e:
                 logger.warning("[SCHEDULER] Aviso na verificação de consolidação mensal: %s", e)
-
-        # Garante a inicialização das sondas de conectividade de rede
-        with app.app_context():
-            try:
-                from app.services.power_service import seed_default_probes_if_empty
-                seed_default_probes_if_empty()
-            except Exception as e:
-                logger.warning("[SCHEDULER] Aviso ao inicializar sondas de energia: %s", e)
-
 
         # Verifica ao ligar o servidor se os dados têm mais de 15 min; se sim, atualiza
         with app.app_context():

@@ -1188,7 +1188,7 @@
                 <img src="{{ url_for('static', filename='img/climae_logo.png') }}" alt="CLIMAE Logo" class="header-logo" />
                 <div>
                     <h1>CLIMAE • Zona Sul do RS</h1>
-                    <p>Monitoramento Meteorológico em Tempo Real & Análise de Risco Regional (MVP Completo)</p>
+                    <p>Monitoramento Meteorológico por Modelos (ECMWF, GFS e ICON) & Análise de Risco Regional (MVP)</p>
                 </div>
             </div>
         </div>
@@ -1263,6 +1263,8 @@
                     <div class="metric-value" id="valProb">--<span class="metric-unit">%</span></div>
                 </div>
             </div>
+            <!-- Medição real da estação INMET mais próxima (só aparece quando há dado) -->
+            <div class="meta-info" id="stationMeta" style="display:none; margin-top:8px;"></div>
 
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 0.55rem; flex-wrap:wrap;">
                 <span class="meta-info">Tendência Horária — Próximas 24h (Horário de Brasília)</span>
@@ -1283,7 +1285,6 @@
                         <div style="font-size: 0.8rem; font-weight: 700; color: #f8fafc; display: flex; align-items: center; gap: 6px;">
                             <span>⚡ Rede Elétrica</span>
                             <span id="powerStatusBadge" class="badge" style="background: rgba(34, 197, 94, 0.15); color: #4ade80; border: 1px solid rgba(34, 197, 94, 0.3); font-size: 0.66rem; padding: 1px 6px;">Estável</span>
-                            <span id="powerTelemetryBadge" class="badge" onclick="checkPowerProbes()" title="Sondas virtuais de conectividade multi-operadora. Clique para retestar." style="background: rgba(14, 165, 233, 0.12); color: #38bdf8; border: 1px solid rgba(14, 165, 233, 0.3); font-size: 0.64rem; padding: 1px 6px; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; transition: all 0.2s ease;">🌐 Sondas: --</span>
                         </div>
                         <div id="powerStatusDesc" style="font-size: 0.72rem; color: var(--text-muted); margin-top: 2px;">
                             Consultando rede elétrica...
@@ -2613,7 +2614,21 @@
                 document.getElementById('valPrecip').innerHTML = `${cur.precipitation_mm ?? '--'}<span class="metric-unit">mm</span>`;
                 document.getElementById('valProb').innerHTML = `${cur.rain_probability ?? '--'}<span class="metric-unit">%</span>`;
                 document.getElementById('weatherMeta').innerText =
-                    `Fonte: ${cur.source} • Última leitura: ${formatBRT(cur.observed_at)} (Horário de Brasília • Ciclo: 15 min)`;
+                    `Fonte: ${cur.source} • Atualizado: ${formatBRT(cur.observed_at)} (Horário de Brasília • Ciclo: 15 min)`;
+            }
+
+            const stationEl = document.getElementById('stationMeta');
+            const st = data.station;
+            if (st) {
+                const fmt = (v, unit) => (v === null || v === undefined) ? '--' : `${v} ${unit}`;
+                stationEl.innerText =
+                    `📡 Medido na estação INMET ${st.code} ${st.name} (${st.distance_km} km) às ${formatBRT(st.observed_at)}: ` +
+                    `${fmt(st.temperature_c, '°C')} • umidade ${fmt(st.humidity_percent, '%')} • ` +
+                    `vento ${fmt(st.wind_speed_kmh, 'km/h')} • chuva 12h ${fmt(st.rain_12h_mm, 'mm')} (dado bruto, sem validação)`;
+                stationEl.style.display = '';
+            } else {
+                stationEl.innerText = '';
+                stationEl.style.display = 'none';
             }
 
             if (data.region && map) {
@@ -3397,7 +3412,6 @@
             const dot = document.getElementById('powerStatusDot');
             const badge = document.getElementById('powerStatusBadge');
             const desc = document.getElementById('powerStatusDesc');
-            const telBadge = document.getElementById('powerTelemetryBadge');
             const btnOutage = document.getElementById('btnReportPowerOutage');
             const btnRestore = document.getElementById('btnReportPowerRestore');
             const officialBanner = document.getElementById('powerOfficialBanner');
@@ -3420,14 +3434,6 @@
                 badge.style.borderColor = 'rgba(239, 68, 68, 0.4)';
                 badge.innerText = `Falta de Luz (${data.reports_30m} relatos)`;
                 desc.innerText = data.label || `${data.reports_30m} moradores relataram falta de energia nos últimos 30 min.`;
-            } else if (data.status === 'blackout_suspected') {
-                dot.style.background = '#f97316';
-                dot.style.boxShadow = '0 0 10px rgba(249, 115, 22, 0.6)';
-                badge.style.background = 'rgba(249, 115, 22, 0.2)';
-                badge.style.color = '#fdba74';
-                badge.style.borderColor = 'rgba(249, 115, 22, 0.4)';
-                badge.innerText = 'Suspeita de Blackout';
-                desc.innerText = 'Todas as operadoras de internet perderam sinal simultaneamente na localidade.';
             } else if (data.status === 'investigating') {
                 dot.style.background = '#facc15';
                 dot.style.boxShadow = '0 0 10px rgba(250, 204, 21, 0.5)';
@@ -3454,34 +3460,7 @@
                 desc.innerText = data.label || 'Sem relatos de interrupção na última hora para esta localidade.';
             }
 
-            // 2. Atualização do Badge de Telemetria de Sondas Virtuais
-            if (telBadge && data.telemetry) {
-                const tel = data.telemetry;
-                if (tel.status === 'healthy') {
-                    telBadge.style.background = 'rgba(14, 165, 233, 0.14)';
-                    telBadge.style.color = '#38bdf8';
-                    telBadge.style.borderColor = 'rgba(14, 165, 233, 0.35)';
-                    telBadge.innerText = `🌐 Sondas: ${tel.up_probes}/${tel.total_probes} online`;
-                    telBadge.title = `Todas as operadoras respondendo normalmente (${tel.providers_up ? tel.providers_up.join(', ') : 'OK'}). Clique para retestar.`;
-                } else if (tel.status === 'telecom_instability') {
-                    telBadge.style.background = 'rgba(234, 179, 8, 0.18)';
-                    telBadge.style.color = '#fde047';
-                    telBadge.style.borderColor = 'rgba(234, 179, 8, 0.4)';
-                    const downNames = tel.providers_down ? tel.providers_down.join(', ') : 'Operadora';
-                    telBadge.innerText = `⚠️ Instabilidade: ${downNames}`;
-                    telBadge.title = `Falha de dados isolada da operadora (energia preservada). Clique para retestar.`;
-                } else if (tel.status === 'blackout_suspected') {
-                    telBadge.style.background = 'rgba(249, 115, 22, 0.22)';
-                    telBadge.style.color = '#fb923c';
-                    telBadge.style.borderColor = 'rgba(249, 115, 22, 0.45)';
-                    telBadge.innerText = `🟠 Sondas Offline (0/${tel.total_probes})`;
-                    telBadge.title = `Todas as operadoras perderam sinal nesta localidade. Suspeita de blackout elétrico.`;
-                } else {
-                    telBadge.innerText = `🌐 Sondas: ${tel.up_probes}/${tel.total_probes}`;
-                }
-            }
-
-            // 3. Botão de Falta de Energia
+            // 2. Botão de Falta de Energia
             if (!data.user_can_report && data.cooldown_remaining > 0) {
                 btnOutage.disabled = true;
                 btnOutage.style.opacity = '0.6';
@@ -3491,9 +3470,7 @@
                 btnOutage.disabled = false;
                 btnOutage.style.opacity = '1';
                 btnOutage.style.cursor = 'pointer';
-                if (data.status === 'blackout_suspected') {
-                    btnOutage.innerText = '⚡ Confirmar Falta de Luz';
-                } else if (data.status === 'outage_reported' || data.status === 'investigating' || data.status === 'official_outage') {
+                if (data.status === 'outage_reported' || data.status === 'investigating' || data.status === 'official_outage') {
                     btnOutage.innerText = '⚡ Continuo Sem Luz';
                 } else if (data.status === 'restored') {
                     btnOutage.innerText = '⚡ Nova Queda? Relatar';
@@ -3502,9 +3479,9 @@
                 }
             }
 
-            // 4. Botão de Restabelecimento ("A Luz Voltou")
+            // 3. Botão de Restabelecimento ("A Luz Voltou")
             if (btnRestore) {
-                if (data.status === 'outage_reported' || data.status === 'investigating' || data.status === 'official_outage' || data.status === 'blackout_suspected') {
+                if (data.status === 'outage_reported' || data.status === 'investigating' || data.status === 'official_outage') {
                     btnRestore.style.display = 'inline-flex';
                     if (!data.user_can_restore && data.restore_cooldown_remaining > 0) {
                         btnRestore.disabled = true;
@@ -3522,7 +3499,7 @@
                 }
             }
 
-            // 5. Banner de Comunicado Oficial (FASE 3 - Concessionária e Defesa Civil)
+            // 4. Banner de Comunicado Oficial (FASE 3 - Concessionária e Defesa Civil)
             if (officialBanner) {
                 if (data.official_bulletin) {
                     const b = data.official_bulletin;
@@ -3595,29 +3572,6 @@
         function closeOfficialBulletinModal() {
             const modal = document.getElementById('officialBulletinModal');
             if (modal) modal.style.display = 'none';
-        }
-
-        async function checkPowerProbes() {
-            const select = document.getElementById('regionSelect');
-            if (!select || !select.value) return;
-            const regionId = parseInt(select.value, 10);
-            const telBadge = document.getElementById('powerTelemetryBadge');
-            if (telBadge) {
-                telBadge.innerText = '🌐 Sondando rede...';
-                telBadge.style.opacity = '0.7';
-            }
-            try {
-                const res = await fetch(`/api/power/probes/check/${regionId}`, { method: 'POST' });
-                if (res.ok) {
-                    const data = await res.json();
-                    currentPowerStatusData = data;
-                    updatePowerStatusUI(data);
-                }
-            } catch (e) {
-                console.warn('Erro ao checar sondas virtuais:', e);
-            } finally {
-                if (telBadge) telBadge.style.opacity = '1';
-            }
         }
 
         function openPowerReportModal() {
