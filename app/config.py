@@ -25,3 +25,7 @@ class Config:
         _db_url = _default_db
 
     SQLALCHEMY_DATABASE_URI = _db_url
+
+    # Chave do mapa de fundo (CARTO Basemaps). Vai para o navegador de todo visitante:
+    # proteja-a restringindo os domínios no painel da CARTO, não escondendo-a.
+    CARTO_BASEMAPS_KEY = os.getenv("CARTO_BASEMAPS_KEY", "").strip()

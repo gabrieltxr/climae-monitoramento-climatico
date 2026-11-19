@@ -1583,3 +1583,24 @@ def test_legacy_create_all_database_is_stamped_and_upgraded(tmp_path):
         assert _schema_diffs() == []
         db.session.remove()
         db.engine.dispose()
+
+
+def test_carto_key_comes_from_config_not_from_template():
+    """A chave da CARTO sai do .env (CARTO_BASEMAPS_KEY); o template não traz chave fixa."""
+    from pathlib import Path
+    template = (Path(__file__).resolve().parent.parent / "app" / "templates" / "index.html").read_text(encoding="utf-8")
+    assert "png?key=" not in template
+
+    class KeyConfig(TestConfig):
+        CARTO_BASEMAPS_KEY = "chave-de-teste_123"
+
+    class NoKeyConfig(TestConfig):
+        CARTO_BASEMAPS_KEY = ""
+
+    for cfg, expected in ((KeyConfig, 'const cartoKey = "chave-de-teste_123";'), (NoKeyConfig, 'const cartoKey = "";')):
+        app = create_app(cfg)
+        with app.app_context():
+            db.create_all()
+            html = app.test_client().get("/").get_data(as_text=True)
+            db.drop_all()
+        assert expected in html
