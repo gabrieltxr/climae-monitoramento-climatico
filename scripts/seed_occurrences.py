@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from app import create_app
+from app.regions_catalog import resolve_region_name
 from app.models import db, Region, Occurrence
 
 HISTORICAL_EVENTS = [
@@ -170,12 +171,13 @@ def seed_occurrences():
     app = create_app()
     with app.app_context():
         inserted = 0
+        missing = []
         for ev in HISTORICAL_EVENTS:
-            region = Region.query.filter_by(
-                municipality=ev["municipality"],
-                name=ev["region_name"]
-            ).first()
+            # Os eventos usam nomes antigos de região ("Sede Urbana"...): traduz pelo catálogo.
+            name = resolve_region_name(ev["municipality"], ev["region_name"])
+            region = Region.query.filter_by(municipality=ev["municipality"], name=name).first() if name else None
             if not region:
+                missing.append(f'{ev["municipality"]} / {ev["region_name"]} ({ev["event_type"]})')
                 continue
 
             exists = Occurrence.query.filter_by(
@@ -200,6 +202,11 @@ def seed_occurrences():
         db.session.commit()
         total = Occurrence.query.count()
         print(f"Histórico atualizado! {inserted} novos eventos inseridos (Total no banco: {total}).")
+        if missing:
+            print(f"AVISO: {len(missing)} evento(s) sem região correspondente (rode antes scripts/seed_regions.py):")
+            for item in missing:
+                print(f"  - {item}")
+        return {"inserted": inserted, "missing": missing}
 
 
 if __name__ == "__main__":

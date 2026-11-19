@@ -1482,3 +1482,52 @@ def test_risk_engine_persist_flag(client):
     assert RiskAssessment.query.count() == 0
     calculate_region_risk(reg)
     assert RiskAssessment.query.count() == 1
+
+
+# --- Catálogo único de regiões ---
+
+def test_region_catalog_is_56_unique_regions():
+    from collections import Counter
+    from app.regions_catalog import REGIONS
+    assert len(REGIONS) == 56
+    assert len({r["name"] for r in REGIONS}) == 56
+    assert set(Counter(r["city"] for r in REGIONS).values()) == {7}
+
+
+def test_scripts_use_the_shared_catalog():
+    from pathlib import Path
+    from app.regions_catalog import REGIONS
+    import scripts.seed_regions as seed_regions
+    assert seed_regions.ALL_REGIONS is REGIONS
+    # cleanup_all_regions roda ao ser importado: confere pelo texto.
+    cleanup = Path("scripts/cleanup_all_regions.py").read_text(encoding="utf-8")
+    assert "CANONICAL_REGIONS = REGIONS" in cleanup and "ALIASES = LEGACY_REGION_NAMES" in cleanup
+    assert '{"name":' not in cleanup  # nenhuma região escrita à mão no script
+
+
+def test_legacy_names_point_to_catalog_regions():
+    from app.regions_catalog import LEGACY_REGION_NAMES, REGION_NAMES
+    for (city, _old), new in LEGACY_REGION_NAMES.items():
+        assert (city, new) in REGION_NAMES
+
+
+def test_historical_occurrences_resolve_to_catalog_regions():
+    from scripts.seed_occurrences import HISTORICAL_EVENTS
+    from app.regions_catalog import resolve_region_name
+    unresolved = [(e["municipality"], e["region_name"]) for e in HISTORICAL_EVENTS
+                  if resolve_region_name(e["municipality"], e["region_name"]) is None]
+    assert unresolved == []
+
+
+def test_readme_region_list_matches_catalog():
+    import re
+    from pathlib import Path
+    from app.regions_catalog import REGIONS
+    expected = {}
+    for r in REGIONS:
+        m = re.match(r".*\((.+)\)$", r["name"])
+        expected.setdefault(r["city"], set()).add(m.group(1) if m else r["name"])
+    readme = Path("README.md").read_text(encoding="utf-8")
+    listed = {city: {i.strip() for i in items.split(",")}
+              for city, items in re.findall(r"^\d\. \*\*(.+?):\*\* (.+)\.$", readme, re.M)}
+    assert listed == expected

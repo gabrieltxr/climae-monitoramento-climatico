@@ -52,7 +52,6 @@ Aplicação web modular em Python (Flask) desenvolvida para monitoramento meteor
   * Chuva Intensa ($\ge$ 25 mm/24h)
   * Vendaval e Rajadas Fortes ($\ge$ 55 km/h)
   * Índice de Risco Crítico ($\ge$ 50 pts)
-* **Alertas de Recuperação:** Registro formal de normalização quando os parâmetros atmosféricos retornam a níveis seguros.
 * **Paginação Server-Side:** Navegação fluida e eficiente na tabela de eventos.
 * **Sem alertas repetidos:** a mesma regra não dispara de novo na mesma região antes de 12 horas (`ALERT_REPEAT_HOURS` no `.env`); um evento longo é relembrado no máximo a cada 12h.
 
@@ -71,14 +70,14 @@ Aplicação web modular em Python (Flask) desenvolvida para monitoramento meteor
 
 ## 2. Municípios e Bairros Monitorados (56 Regiões)
 
-O sistema cobre 8 municípios do extremo sul gaúcho:
-1. **Rio Grande:** Centro, Cassino, Ilha dos Marinheiros, Cidade Nova, Parque Marinha, Vila Rocha, Barra.
-2. **Pelotas:** Centro, Laranjal, Fragata, Três Vendas, Areal, São Gonçalo, Colônia Z3.
+O sistema cobre 8 municípios do extremo sul gaúcho (lista mantida em `app/regions_catalog.py`):
+1. **Rio Grande:** Centro, Cidade Nova, Vila Junção, Parque Marinha, Parque São Pedro, Cassino, Ilha dos Marinheiros.
+2. **Pelotas:** Centro, Laranjal, Areal, Três Vendas, Fragata, São Gonçalo, Colônia / Cascata.
 3. **São José do Norte:** Centro, Quinta Secção / Barra, Guarida / Tamandaré, São Caetano, Mar Grosso, Estreito, Bojuru.
-4. **São Lourenço do Sul:** Centro, Praia / Barrinha, Navegantes, Lomba / BR-116, Boa Vista, Boqueirão, Harmonia.
-5. **Canguçu:** Centro, Vila Nova, Canguçu Velho, Iguatemi, Herval, Armada, Coxilha dos Campos.
-6. **Jaguarão:** Centro, Cerro da Pólvora, Carvalho / BR-116, Vila Kennedy, Ponta Alegre / Mirim, Cerrito, Passo do Centurião.
-7. **Santa Vitória do Palmar:** Centro, Curral Alto, Barra do Chuy, Porto de Santa Vitória, Hermenegildo, Taim / Capilha.
+4. **São Lourenço do Sul:** Centro, Praia / Barrinha, Lomba / BR-116, Navegantes, Boa Vista, Boqueirão, Harmonia.
+5. **Canguçu:** Centro, Vila Nova / ERS-265, Canguçu Velho, Iguatemi, Herval - 3º Dist., Armada, Coxilha dos Campos.
+6. **Jaguarão:** Centro, Cerro da Pólvora, Carvalho / BR-116, Vila Kennedy, Ponta Alegre / Mirim, Cerrito / BR-116, Passo do Centurião.
+7. **Santa Vitória do Palmar:** Centro, Porto / Lagoa Mirim, Coxilha / BR-471, Praia do Hermenegildo, Barra do Chuí, Curral Alto, Taim / Capilha.
 8. **Chuí:** Centro, Acesso Norte / BR-471, Vila América, Bairro Juventude, Várzea do Arroio Chuí, Estrada da Barra, Colônia São João.
 
 ---
