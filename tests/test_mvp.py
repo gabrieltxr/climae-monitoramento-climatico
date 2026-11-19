@@ -225,8 +225,9 @@ def test_prune_expired_data_service(client):
         assert remaining_fc[0].precipitation_mm == 5.0
 
 
-def test_monthly_consolidation_service(client):
+def test_monthly_consolidation_service(client, monkeypatch):
     """Valida o cálculo de mês fechado e verificação de consolidação incremental."""
+    from app.services import monthly_consolidation as mc
     from app.services.monthly_consolidation import get_closed_month, is_month_consolidated, consolidate_closed_month
     from datetime import datetime
 
@@ -242,11 +243,19 @@ def test_monthly_consolidation_service(client):
     assert y_jan == 2026
     assert m_jan == 12
 
+    # API ERA5 simulada: o teste não depende de rede nem da data em que roda.
+    monkeypatch.setattr(mc, "fetch_month_daily", _fake_era5(incomplete_months=()))
+    ref = datetime(2026, 11, 7, 3, 0, tzinfo=timezone.utc)
     with client.application.app_context():
-        # Executa consolidação no contexto atual
-        res = consolidate_closed_month()
-        assert "status" in res
-        assert res["status"] in ("already_consolidated", "success", "awaiting_era5")
+        res = consolidate_closed_month(reference_date=ref)
+        assert res["status"] == "success"
+        assert (res["year"], res["month"]) == (2026, 10)
+        assert is_month_consolidated(2026, 10)
+
+        # Segunda verificação no mesmo dia: nada a fazer.
+        res = consolidate_closed_month(reference_date=ref)
+        assert res["status"] == "already_consolidated"
+        assert res["updated_regions"] == 0
 
 
 def test_power_outage_crowdsourcing_api(client):
@@ -298,22 +307,33 @@ def test_power_restoration_crowdsourcing_api(client):
         assert res_rep.status_code == 200
         assert res_rep.get_json()["status"] == "investigating"
 
-        # 2. Confirma restabelecimento ("A Luz Voltou")
+        # 2. Primeira confirmação ("A Luz Voltou"): é só um voto, o relato continua valendo
         res_rest = client.post("/api/power/restore", json={"region_id": reg.id, "comment": "A luz retornou estável"})
         assert res_rest.status_code == 200
         rest_data = res_rest.get_json()
         assert rest_data["success"] is True
-        assert rest_data["status"] == "restored"
-        assert "Energia Restabelecida" in rest_data["label"]
-        assert rest_data["reports_30m"] == 0
-        assert rest_data["restored_time"] is not None
+        assert rest_data["restoration_confirmed"] is False
+        assert rest_data["status"] == "investigating"
+        assert rest_data["reports_30m"] == 1
+        assert "outro morador" in rest_data["message"]
 
-        # 3. Tentativa de confirmação repetida de retorno do mesmo IP -> rate limited (429)
+        # 3. Confirmação repetida do mesmo IP -> rate limited (429)
         res_dup_rest = client.post("/api/power/restore", json={"region_id": reg.id})
         assert res_dup_rest.status_code == 429
         assert "cooldown_remaining" in res_dup_rest.get_json()
 
-        # 4. Se houver nova queda de energia posterior (de outro IP), o status deve voltar para investigando/outage
+        # 4. Segunda confirmação, de outro IP -> consenso: energia restabelecida
+        res_rest_2 = client.post("/api/power/restore", json={"region_id": reg.id},
+                                 environ_base={"REMOTE_ADDR": "10.0.0.40"})
+        assert res_rest_2.status_code == 200
+        rest_2 = res_rest_2.get_json()
+        assert rest_2["restoration_confirmed"] is True
+        assert rest_2["status"] == "restored"
+        assert "Energia Restabelecida" in rest_2["label"]
+        assert rest_2["reports_30m"] == 0
+        assert rest_2["restored_time"] is not None
+
+        # 5. Se houver nova queda de energia posterior (de outro IP), o status deve voltar para investigando/outage
         res_new_outage = client.post(
             "/api/power/report",
             json={"region_id": reg.id, "comment": "Caiu novamente agora"},
@@ -535,22 +555,38 @@ def test_collector_saves_circular_wind_direction(client):
         assert all(f.wind_direction == 0.0 for f in fcs)
 
 
-def _fake_era5_october(missing_last_days: int = 0):
-    """Série diária simulada de 10/2026 (31 dias); os últimos dias podem vir null (ERA5 atrasado)."""
+def _fake_era5(missing_last_days: int = 0, incomplete_months: tuple = ("2026-10",)):
+    """Série diária simulada do mês pedido; nos meses de `incomplete_months`, os últimos
+    `missing_last_days` dias vêm null (ERA5 atrasado)."""
     def fake_fetch(lat, lon, start_date, end_date):
-        rain = [2.0] * 31
-        temp = [18.0] * 31
-        for i in range(31 - missing_last_days, 31):
-            rain[i] = None
-            temp[i] = None
+        days = int(end_date[-2:])
+        rain = [2.0] * days
+        temp = [18.0] * days
+        if start_date[:7] in incomplete_months:
+            for i in range(days - missing_last_days, days):
+                rain[i] = None
+                temp[i] = None
         return {
             "precipitation_sum": rain,
             "temperature_2m_mean": temp,
-            "temperature_2m_max": [24.0] * 31,
-            "temperature_2m_min": [12.0] * 31,
-            "wind_speed_10m_max": [30.0] * 31,
+            "temperature_2m_max": [24.0] * days,
+            "temperature_2m_min": [12.0] * days,
+            "wind_speed_10m_max": [30.0] * days,
         }
     return fake_fetch
+
+
+def _fake_era5_october(missing_last_days: int = 0):
+    return _fake_era5(missing_last_days, incomplete_months=("2026-10",))
+
+
+def _seed_months(region_ids, months):
+    """Grava meses já consolidados (para isolar o mês sob teste da janela de revisão)."""
+    from app.models import db, MonthlyClimateSummary
+    for rid in region_ids:
+        for year, month in months:
+            db.session.add(MonthlyClimateSummary(region_id=rid, year=year, month=month, total_rain_mm=1.0))
+    db.session.commit()
 
 
 def test_era5_availability_window():
@@ -568,10 +604,12 @@ def test_consolidation_waits_for_era5(client, monkeypatch):
     calls = []
     monkeypatch.setattr(mc, "fetch_month_daily", lambda *a: calls.append(a) or _fake_era5_october()(*a))
     with client.application.app_context():
+        from app.models import Region
+        _seed_months([r.id for r in Region.query.all()], [(2026, 8), (2026, 9)])
         res = mc.consolidate_closed_month(reference_date=datetime(2026, 11, 1, 3, 0, tzinfo=timezone.utc))
         assert res["status"] == "awaiting_era5"
         assert calls == []
-        assert MonthlyClimateSummary.query.count() == 0
+        assert MonthlyClimateSummary.query.filter_by(year=2026, month=10).count() == 0
 
 
 def test_consolidation_skips_incomplete_series_and_retries(client, monkeypatch):
@@ -580,6 +618,8 @@ def test_consolidation_skips_incomplete_series_and_retries(client, monkeypatch):
     from app.services import monthly_consolidation as mc
     ref = datetime(2026, 11, 7, 3, 0, tzinfo=timezone.utc)
     with client.application.app_context():
+        from app.models import Region
+        _seed_months([r.id for r in Region.query.all()], [(2026, 8), (2026, 9)])
         monkeypatch.setattr(mc, "fetch_month_daily", _fake_era5_october(missing_last_days=5))
         res = mc.consolidate_closed_month(reference_date=ref)
         assert res["incomplete_regions"] == 1
@@ -594,6 +634,48 @@ def test_consolidation_skips_incomplete_series_and_retries(client, monkeypatch):
         assert rec.rainy_days == 31
 
 
+def test_recent_closed_months_window():
+    """A janela cobre os 3 últimos meses fechados, inclusive na virada do ano."""
+    from app.services.monthly_consolidation import get_recent_closed_months
+    ref = datetime(2027, 2, 10, 3, 0, tzinfo=timezone.utc)
+    assert get_recent_closed_months(ref) == [(2026, 11), (2026, 12), (2027, 1)]
+
+
+def test_consolidation_catches_up_month_pending_at_rollover(client, monkeypatch):
+    """Região pendente em outubro quando o mês vira continua sendo tentada em dezembro."""
+    from app.models import MonthlyClimateSummary
+    from app.services import monthly_consolidation as mc
+    with client.application.app_context():
+        from app.models import Region
+        _seed_months([r.id for r in Region.query.all()], [(2026, 8), (2026, 9)])
+
+        # Novembro: outubro com ERA5 incompleto fica pendente.
+        monkeypatch.setattr(mc, "fetch_month_daily", _fake_era5_october(missing_last_days=5))
+        mc.consolidate_closed_month(reference_date=datetime(2026, 11, 7, 3, 0, tzinfo=timezone.utc))
+        assert MonthlyClimateSummary.query.filter_by(year=2026, month=10).count() == 0
+
+        # Dezembro: o alvo passa a ser novembro, mas outubro (agora completo) é recuperado.
+        monkeypatch.setattr(mc, "fetch_month_daily", _fake_era5(incomplete_months=()))
+        res = mc.consolidate_closed_month(reference_date=datetime(2026, 12, 7, 3, 0, tzinfo=timezone.utc))
+        assert (res["year"], res["month"]) == (2026, 11)
+        assert res["status"] == "success"
+        assert MonthlyClimateSummary.query.filter_by(year=2026, month=10).count() == 1
+        assert MonthlyClimateSummary.query.filter_by(year=2026, month=11).count() == 1
+
+
+def test_consolidation_window_makes_no_requests_without_gaps(client, monkeypatch):
+    """Com os 3 meses já consolidados, nenhuma requisição é feita à API."""
+    from app.services import monthly_consolidation as mc
+    calls = []
+    monkeypatch.setattr(mc, "fetch_month_daily", lambda *a: calls.append(a))
+    with client.application.app_context():
+        from app.models import Region
+        _seed_months([r.id for r in Region.query.all()], [(2026, 8), (2026, 9), (2026, 10)])
+        res = mc.consolidate_closed_month(reference_date=datetime(2026, 11, 7, 3, 0, tzinfo=timezone.utc))
+        assert res["status"] == "already_consolidated"
+        assert calls == []
+
+
 # ------------------------- Segurança (item 5) -------------------------
 
 def test_run_server_settings_never_expose_debugger():
@@ -604,6 +686,17 @@ def test_run_server_settings_never_expose_debugger():
     assert resolve_server_settings({"CLIMAE_HOST": "0.0.0.0", "FLASK_DEBUG": "1"})[2] is False
     assert resolve_server_settings({"FLASK_DEBUG": "0"})[2] is False
     assert resolve_server_settings({"CLIMAE_PORT": "8080"})[1] == 8080
+
+
+def test_secret_key_check_blocks_public_key_when_exposed():
+    """Chave vazia/pública: exposto na rede não sobe; local sobe com aviso; chave própria sobe."""
+    from run import check_secret_key
+    for weak in (None, "", "dev-secret-key", "chave-secreta-desenvolvimento-mvp"):
+        can_start, msg = check_secret_key(weak, "0.0.0.0")
+        assert can_start is False and "NÃO iniciado" in msg
+        can_start, msg = check_secret_key(weak, "127.0.0.1")
+        assert can_start is True and msg
+    assert check_secret_key("a" * 64, "0.0.0.0") == (True, None)
 
 
 def test_bulletin_post_requires_admin_token(client, monkeypatch):
@@ -641,6 +734,129 @@ def test_power_cooldown_ignores_spoofed_forwarded_for(client):
     status = client.get(f"/api/power/status/{reg_id}").get_json()
     assert status["reports_30m"] == 1
     assert status["status"] != "outage_reported"
+
+
+def test_power_ip_cap_blocks_user_agent_rotation(client):
+    """Trocar o User-Agent não deixa um único IP disparar 'Falta de Luz Reportada' (3 relatos)."""
+    with client.application.app_context():
+        reg_id = Region.query.first().id
+    codes = [
+        client.post("/api/power/report", json={"region_id": reg_id},
+                    headers={"User-Agent": f"agente-{i}"}).status_code
+        for i in range(4)
+    ]
+    assert codes == [200, 200, 429, 429]
+    status = client.get(f"/api/power/status/{reg_id}").get_json()
+    assert status["reports_30m"] == 2
+    assert status["status"] != "outage_reported"
+
+    # Outro IP (outro morador) continua podendo relatar e completa os 3 relatos.
+    res = client.post("/api/power/report", json={"region_id": reg_id},
+                      environ_base={"REMOTE_ADDR": "10.0.0.7"})
+    assert res.status_code == 200
+    assert client.get(f"/api/power/status/{reg_id}").get_json()["status"] == "outage_reported"
+
+
+def test_single_restore_cannot_hide_outage(client):
+    """Um único 'A Luz Voltou' (mesmo trocando User-Agent) não esconde uma falta de luz relatada."""
+    from app.models import PowerOutageReport
+    with client.application.app_context():
+        reg_id = Region.query.first().id
+    for ip in ("10.1.0.1", "10.1.0.2", "10.1.0.3"):
+        client.post("/api/power/report", json={"region_id": reg_id}, environ_base={"REMOTE_ADDR": ip})
+    assert client.get(f"/api/power/status/{reg_id}").get_json()["status"] == "outage_reported"
+
+    codes = [
+        client.post("/api/power/restore", json={"region_id": reg_id},
+                    headers={"User-Agent": f"agente-{i}"},
+                    environ_base={"REMOTE_ADDR": "10.9.9.9"}).status_code
+        for i in range(3)
+    ]
+    assert codes == [200, 429, 429]
+    status = client.get(f"/api/power/status/{reg_id}").get_json()
+    assert status["status"] == "outage_reported"
+    assert status["restore_confirmations"] == 1
+    with client.application.app_context():
+        # A confirmação não mexe mais nos relatos gravados.
+        assert PowerOutageReport.query.filter_by(region_id=reg_id, is_active=True).count() == 3
+
+
+def test_late_single_restore_does_not_hide_new_reports(client):
+    """Depois do consenso, uma confirmação isolada não esconde relatos de uma nova queda."""
+    from datetime import timedelta
+    from app.models import PowerOutageReport, PowerRestorationReport
+    from app.services.power_service import get_power_status
+    with client.application.app_context():
+        reg_id = Region.query.first().id
+        now = datetime.now(timezone.utc)
+        for minutes_ago, h in ((30, "a"), (25, "b")):
+            db.session.add(PowerRestorationReport(region_id=reg_id, reporter_hash=h,
+                                                  restored_at=now - timedelta(minutes=minutes_ago)))
+        for minutes_ago, h in ((10, "x"), (9, "y"), (8, "z")):
+            db.session.add(PowerOutageReport(region_id=reg_id, reporter_hash=h, is_active=True,
+                                             reported_at=now - timedelta(minutes=minutes_ago)))
+        db.session.add(PowerRestorationReport(region_id=reg_id, reporter_hash="c",
+                                              restored_at=now - timedelta(minutes=1)))
+        db.session.commit()
+        status = get_power_status(reg_id)
+        assert status["restoration_confirmed"] is True
+        assert status["reports_30m"] == 3
+        assert status["status"] == "outage_reported"
+
+
+def test_power_posts_have_global_ip_limit(client):
+    """Mais de 30 POSTs em /api/power/* por IP em 10 min recebem 429; GETs e boletins não contam."""
+    from app.services import power_service
+    with client.application.app_context():
+        reg_id = Region.query.first().id
+    for _ in range(power_service.POWER_POST_LIMIT):
+        assert client.post(f"/api/power/probes/check/{reg_id}").status_code == 200
+    blocked = client.post(f"/api/power/probes/check/{reg_id}")
+    assert blocked.status_code == 429
+    assert "Muitas requisições" in blocked.get_json()["error"]
+    assert client.post("/api/power/report", json={"region_id": reg_id}).status_code == 429
+    assert client.get(f"/api/power/status/{reg_id}").status_code == 200
+    # Outro IP não é afetado; boletins (com token de admin) ficam fora do limite.
+    assert client.post(f"/api/power/probes/check/{reg_id}",
+                       environ_base={"REMOTE_ADDR": "10.2.0.1"}).status_code == 200
+    assert client.post("/api/power/bulletins", json={}).status_code == 403
+
+
+def test_power_vote_region_id_is_normalized(client):
+    """'1', '01', 1.0 etc. não furam o teto por IP; tipos inválidos dão 400 e região inexistente 404."""
+    with client.application.app_context():
+        reg_id = Region.query.first().id
+    ip = {"REMOTE_ADDR": "9.9.9.9"}
+    codes = [
+        client.post("/api/power/report", json={"region_id": rid},
+                    headers={"User-Agent": repr(rid)}, environ_base=ip).status_code
+        for rid in (reg_id, str(reg_id), f"0{reg_id}", f" {reg_id} ")
+    ]
+    assert codes == [200, 200, 429, 429]
+    assert client.get(f"/api/power/status/{reg_id}").get_json()["reports_30m"] == 2
+
+    for bad in (1.0, True, "abc", [reg_id], {"a": 1}, -1, 0):
+        for route in ("/api/power/report", "/api/power/restore"):
+            res = client.post(route, json={"region_id": bad}, environ_base={"REMOTE_ADDR": "9.9.9.8"})
+            assert res.status_code == 400, (route, bad)
+    for route in ("/api/power/report", "/api/power/restore"):
+        assert client.post(route, json={}).status_code == 400
+        assert client.post(route, json=[1]).status_code == 400
+        assert client.post(route, json={"region_id": reg_id, "comment": ["x"]}).status_code == 400
+        assert client.post(route, json={"region_id": 99999}).status_code == 404
+
+
+def test_ip_report_limiter_window_and_regions():
+    """A vaga libera quando o relato mais antigo sai da janela; regiões contam separado."""
+    from datetime import timedelta
+    from app.services.power_service import IpReportLimiter
+    lim = IpReportLimiter(limit=2, window_minutes=30)
+    t0 = datetime(2026, 11, 18, 12, 0, tzinfo=timezone.utc)
+    assert lim.try_acquire("ip", 1, t0) == (True, 0)
+    assert lim.try_acquire("ip", 1, t0 + timedelta(minutes=10)) == (True, 0)
+    assert lim.try_acquire("ip", 1, t0 + timedelta(minutes=20)) == (False, 10)
+    assert lim.try_acquire("ip", 2, t0 + timedelta(minutes=20)) == (True, 0)
+    assert lim.try_acquire("ip", 1, t0 + timedelta(minutes=30, seconds=1)) == (True, 0)
 
 
 def test_alerts_pagination_is_bounded(client):
@@ -876,3 +1092,40 @@ def test_backup_sqlite_database_refuses_missing_or_existing(tmp_path):
     assert first.endswith("x.backup-20261118-120000.db")
     with pytest.raises(FileExistsError):
         backup_sqlite_database(str(src), now=when)
+
+
+# ------------------------- Carga histórica (item 4d) -------------------------
+
+def test_seed_end_date_skips_open_month_and_era5_lag():
+    """A carga termina no último mês fechado com ERA5 completo, nunca no mês em andamento."""
+    from scripts.seed_monthly_climate import get_seed_end_date
+    # 24/10: outubro em andamento -> setembro é o último mês completo.
+    assert get_seed_end_date(datetime(2026, 10, 24, 18, 0, tzinfo=timezone.utc)) == "2026-09-30"
+    # 03/11: outubro fechado, mas ainda dentro do atraso do ERA5.
+    assert get_seed_end_date(datetime(2026, 11, 3, 3, 0, tzinfo=timezone.utc)) == "2026-09-30"
+    # 06/11: ERA5 de outubro publicado.
+    assert get_seed_end_date(datetime(2026, 11, 6, 3, 0, tzinfo=timezone.utc)) == "2026-10-31"
+    # Virada do ano.
+    assert get_seed_end_date(datetime(2027, 1, 2, 3, 0, tzinfo=timezone.utc)) == "2026-11-30"
+
+
+def test_seed_does_not_save_partial_month(client):
+    """Mês com dias faltando na série (fim do ERA5 ou mês em andamento) não é gravado."""
+    from app.models import Region, MonthlyClimateSummary
+    from scripts.seed_monthly_climate import aggregate_and_save_region
+    dates = [f"2026-09-{d:02d}" for d in range(1, 31)] + [f"2026-10-{d:02d}" for d in range(1, 22)]
+    n = len(dates)
+    daily = {
+        "time": dates,
+        "temperature_2m_mean": [18.0] * n,
+        "temperature_2m_max": [24.0] * n,
+        "temperature_2m_min": [12.0] * n,
+        "precipitation_sum": [2.0] * n,
+        "wind_speed_10m_max": [30.0] * n,
+    }
+    with client.application.app_context():
+        region = Region.query.first()
+        aggregate_and_save_region(region, daily)
+        saved = {(r.year, r.month) for r in MonthlyClimateSummary.query.filter(
+            MonthlyClimateSummary.region_id == region.id, MonthlyClimateSummary.year > 0)}
+        assert saved == {(2026, 9)}

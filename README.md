@@ -121,6 +121,11 @@ Acesse a aplicação no navegador em: **`http://127.0.0.1:5000`**
 > agendador em **um único** processo separado com `python scripts/run_scheduler.py`
 > (e não rode `run.py` ao mesmo tempo, para não duplicar as coletas).
 
+> **SECRET_KEY:** é o sal do hash anônimo dos relatos de energia. Defina uma chave
+> própria no `.env` (`python -c "import secrets; print(secrets.token_hex(32))"`).
+> Com `CLIMAE_HOST` fora de 127.0.0.1, o `run.py` recusa subir com chave vazia ou
+> pública. Via WSGI essa verificação não roda: defina a chave antes de publicar.
+
 ---
 
 ## 4. Scripts e Utilitários de Manutenção
@@ -132,6 +137,36 @@ Acesse a aplicação no navegador em: **`http://127.0.0.1:5000`**
 * `scripts/sync_climate_history.py`: Audita a integridade do banco e sincroniza a climatologia ERA5 das 56 regiões.
 * `scripts/seed_monthly_climate.py`: Rotina avançada de carga direta da API ERA5 Open-Meteo.
 * `scripts/cleanup_all_regions.py`: Limpeza e reestruturação atômica das regiões.
+
+### Publicar boletins oficiais de energia
+
+Ainda não há tela para isso (prevista para a reconstrução do frontend); a publicação é
+feita direto pela API, com um token de administrador.
+
+1. Defina no `.env` um token longo e aleatório e reinicie o servidor
+   (vazio = publicação desativada):
+   `ADMIN_API_TOKEN=` + o resultado de `python -c "import secrets; print(secrets.token_hex(32))"`
+2. Envie o boletim com o token no header `X-Admin-Token`:
+
+```bash
+curl -X POST http://127.0.0.1:5000/api/power/bulletins \
+  -H "Content-Type: application/json" \
+  -H "X-Admin-Token: SEU_TOKEN" \
+  -d '{"municipality": "Pelotas", "headline": "Interrupção no Centro", "body": "Equipes em campo; previsão de retorno às 18h.", "affected_customers": 1200, "severity": "critico"}'
+```
+
+| Campo | Obrigatório | Observação |
+| --- | --- | --- |
+| `municipality` | sim | Município como cadastrado nas regiões; `Zona Sul`, `Geral` ou `Rio Grande do Sul` valem para todas as regiões. |
+| `headline`, `body` | sim | Título e texto do comunicado. |
+| `affected_customers` | não | Acima de **500**, o painel da região passa a "Interrupção de Energia Confirmada pela Concessionária". |
+| `severity` | não | `informativo`, `alerta` (padrão) ou `critico`. |
+| `status` | não | `ativo` (padrão). Só boletins ativos das últimas **48 h** aparecem no painel. |
+| `source` | não | Padrão: `CEEE Grupo Equatorial`. |
+| `region_id` | não | Região específica (opcional; o painel filtra pelo município). |
+
+A data de publicação é sempre o momento do envio. Resposta `201` = publicado;
+`403` = token ausente ou errado; `400` = campo obrigatório faltando.
 
 ---
 

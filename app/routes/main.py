@@ -420,6 +420,27 @@ def api_climate_history(region_id: int):
 # MONITORAMENTO DE ENERGIA ELÉTRICA (CROWDSOURCING & SITUAÇÃO DA REDE)
 # =========================================================================
 
+@main_bp.before_request
+def limit_public_power_posts():
+    """
+    Limite geral por IP nos POSTs públicos de /api/power/* (relatos, confirmações e
+    checagem de sondas). A publicação de boletins fica de fora: exige token de admin.
+    """
+    if request.method != "POST" or not request.path.startswith("/api/power/"):
+        return None
+    if request.path == "/api/power/bulletins":
+        return None
+    from app.services.power_service import generate_ip_key, get_power_post_limiter
+    allowed, remaining = get_power_post_limiter().try_acquire(generate_ip_key(request), "power-post")
+    if allowed:
+        return None
+    return jsonify({
+        "success": False,
+        "error": f"Muitas requisições da sua rede. Aguarde mais {remaining} minuto(s).",
+        "cooldown_remaining": remaining,
+    }), 429
+
+
 @main_bp.route('/api/power/status/<int:region_id>')
 def api_power_status(region_id: int):
     """Retorna o status atual de abastecimento elétrico da região e cooldown do usuário."""
@@ -429,19 +450,57 @@ def api_power_status(region_id: int):
     return jsonify(status_data)
 
 
+def parse_region_id(value) -> int | None:
+    """
+    Normaliza o region_id do JSON para inteiro positivo. Aceita só int ou texto de dígitos;
+    recusa bool, float, listas e objetos. Os limitadores contam por (IP, região): sem essa
+    normalização, "1", "01" e 1.0 virariam regiões diferentes para eles e iguais para o banco.
+    """
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value if value > 0 else None
+    if isinstance(value, str):
+        text = value.strip()
+        if text.isascii() and text.isdigit() and int(text) > 0:
+            return int(text)
+    return None
+
+
+def _parse_power_vote():
+    """
+    Valida o corpo de /api/power/report e /api/power/restore.
+    Retorna (region_id, comentário, None) ou (None, None, resposta de erro).
+    """
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return None, None, (jsonify({"success": False, "error": "Corpo da requisição deve ser um objeto JSON."}), 400)
+
+    if data.get('region_id') in (None, ""):
+        return None, None, (jsonify({"success": False, "error": "ID da região é obrigatório."}), 400)
+    region_id = parse_region_id(data.get('region_id'))
+    if region_id is None:
+        return None, None, (jsonify({"success": False, "error": "ID da região inválido."}), 400)
+
+    comment = data.get('comment')
+    if comment is not None and not isinstance(comment, str):
+        return None, None, (jsonify({"success": False, "error": "Comentário deve ser texto."}), 400)
+
+    if db.session.get(Region, region_id) is None:
+        return None, None, (jsonify({"success": False, "error": "Região não encontrada."}), 404)
+    return region_id, comment, None
+
+
 @main_bp.route('/api/power/report', methods=['POST'])
 def api_power_report():
     """Registra um relato colaborativo de falta de energia com proteção anti-spam."""
-    from app.services.power_service import generate_reporter_hash, record_power_outage_report
-    data = request.get_json() or {}
-    region_id = data.get('region_id')
-    comment = data.get('comment')
-
-    if not region_id:
-        return jsonify({"success": False, "error": "ID da região é obrigatório."}), 400
+    from app.services.power_service import generate_ip_key, generate_reporter_hash, record_power_outage_report
+    region_id, comment, error = _parse_power_vote()
+    if error:
+        return error
 
     reporter_hash = generate_reporter_hash(request)
-    result = record_power_outage_report(region_id, reporter_hash, comment)
+    result = record_power_outage_report(region_id, reporter_hash, comment, ip_key=generate_ip_key(request))
     status_code = 200 if result.get("success") else 429
     return jsonify(result), status_code
 
@@ -449,16 +508,13 @@ def api_power_report():
 @main_bp.route('/api/power/restore', methods=['POST'])
 def api_power_restore():
     """Registra uma confirmação colaborativa de retorno da luz ("A Luz Voltou") com proteção anti-spam."""
-    from app.services.power_service import generate_reporter_hash, record_power_restoration
-    data = request.get_json() or {}
-    region_id = data.get('region_id')
-    comment = data.get('comment')
-
-    if not region_id:
-        return jsonify({"success": False, "error": "ID da região é obrigatório."}), 400
+    from app.services.power_service import generate_ip_key, generate_reporter_hash, record_power_restoration
+    region_id, comment, error = _parse_power_vote()
+    if error:
+        return error
 
     reporter_hash = generate_reporter_hash(request)
-    result = record_power_restoration(region_id, reporter_hash, comment)
+    result = record_power_restoration(region_id, reporter_hash, comment, ip_key=generate_ip_key(request))
     status_code = 200 if result.get("success") else 429
     return jsonify(result), status_code
 

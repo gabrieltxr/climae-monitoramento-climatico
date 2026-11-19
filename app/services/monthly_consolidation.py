@@ -25,6 +25,11 @@ ARCHIVE_URL = "https://archive-api.open-meteo.com/v1/archive"
 # do mês fechado vêm como null na API e o mês seria consolidado incompleto.
 ERA5_LAG_DAYS = 6
 
+# Quantos meses fechados são revisados a cada verificação. Uma região que ainda estava
+# pendente quando o mês virou continua sendo tentada nos meses seguintes, em vez de
+# ficar sem aquele mês no histórico para sempre.
+CATCH_UP_MONTHS = 3
+
 
 def get_closed_month(reference_date: datetime = None) -> tuple[int, int]:
     """Retorna o ano e mês do último mês completamente encerrado."""
@@ -33,6 +38,16 @@ def get_closed_month(reference_date: datetime = None) -> tuple[int, int]:
     first_of_current = datetime(reference_date.year, reference_date.month, 1, tzinfo=timezone.utc)
     last_of_previous = first_of_current - timedelta(days=1)
     return last_of_previous.year, last_of_previous.month
+
+
+def get_recent_closed_months(reference_date: datetime = None, count: int = CATCH_UP_MONTHS) -> list[tuple[int, int]]:
+    """Retorna os `count` últimos meses fechados, do mais antigo para o mais recente."""
+    year, month = get_closed_month(reference_date)
+    months = []
+    for _ in range(count):
+        months.append((year, month))
+        year, month = (year, month - 1) if month > 1 else (year - 1, 12)
+    return list(reversed(months))
 
 
 def is_era5_available(year: int, month: int, reference_date: datetime = None) -> bool:
@@ -132,12 +147,35 @@ def recalculate_normal_for_month(region_id: int, month: int, now_utc: datetime):
 
 def consolidate_closed_month(force: bool = False, reference_date: datetime = None) -> dict:
     """
-    Executa a consolidação do mês encerrado caso ainda não esteja no banco.
+    Consolida o último mês encerrado e revisa os CATCH_UP_MONTHS - 1 meses anteriores,
+    preenchendo só as regiões que ainda não têm registro neles (sem lacunas, não há
+    nenhuma requisição extra). `force` vale apenas para o último mês encerrado.
+
+    Retorna o status do último mês encerrado; `updated_regions` e `incomplete_regions`
+    somam todos os meses revisados, e `months` traz o resultado de cada um.
+    """
+    months = get_recent_closed_months(reference_date)
+    results = [
+        consolidate_month(year, month, force=force and (year, month) == months[-1], reference_date=reference_date)
+        for year, month in months
+    ]
+    latest = results[-1]
+    return {
+        "status": latest["status"],
+        "year": latest["year"],
+        "month": latest["month"],
+        "updated_regions": sum(r["updated_regions"] for r in results),
+        "incomplete_regions": sum(r["incomplete_regions"] for r in results),
+        "months": results,
+    }
+
+
+def consolidate_month(target_year: int, target_month: int, force: bool = False, reference_date: datetime = None) -> dict:
+    """
+    Consolida um mês fechado específico caso ainda não esteja no banco.
     Só grava regiões cuja série diária do mês está completa no ERA5.
     Retorna um dicionário com o status e a quantidade de regiões consolidadas.
     """
-    target_year, target_month = get_closed_month(reference_date)
-
     if not is_era5_available(target_year, target_month, reference_date):
         logger.info(
             "[CONSOLIDATOR] ERA5 de %02d/%d ainda não publicado por completo (atraso de ~%d dias). Aguardando.",
