@@ -53,7 +53,8 @@ Aplicação web modular em Python (Flask) desenvolvida para monitoramento meteor
   * Vendaval e Rajadas Fortes ($\ge$ 55 km/h)
   * Índice de Risco Crítico ($\ge$ 50 pts)
 * **Alertas de Recuperação:** Registro formal de normalização quando os parâmetros atmosféricos retornam a níveis seguros.
-* **Paginação Server-Side:** Navegação fluida e eficiente na tabela de eventos com controle de deduplicação diária (`dedup_key`).
+* **Paginação Server-Side:** Navegação fluida e eficiente na tabela de eventos.
+* **Sem alertas repetidos:** a mesma regra não dispara de novo na mesma região antes de 12 horas (`ALERT_REPEAT_HOURS` no `.env`); um evento longo é relembrado no máximo a cada 12h.
 
 ### 06. Histórico Climático Mensal & Normais Climatológicas (ERA5)
 * **100% de Cobertura das 56 Regiões:** Mais de **18.700 registros consolidados**.

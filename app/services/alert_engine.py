@@ -13,6 +13,10 @@ logger = logging.getLogger(__name__)
 RAIN_ALERT_MM = float(os.getenv("ALERT_RAIN_THRESHOLD_MM", "25.0"))       # Acumulado 24h >= 25mm
 WIND_ALERT_KMH = float(os.getenv("ALERT_WIND_THRESHOLD_KMH", "55.0"))     # Vento >= 55 km/h
 RISK_ALERT_SCORE = float(os.getenv("ALERT_RISK_THRESHOLD_SCORE", "50.0")) # Score >= 50 (Alto / Muito alto)
+# Mesma regra na mesma região não dispara de novo antes deste intervalo (evento longo é
+# relembrado no máximo a cada N horas). Substitui a deduplicação por dia UTC, que virava
+# às 21h de Brasília e repetia o alerta 15 min depois.
+ALERT_REPEAT_HOURS = float(os.getenv("ALERT_REPEAT_HOURS", "12"))
 
 
 def send_email_notification(subject: str, body: str) -> str:
@@ -53,12 +57,12 @@ def evaluate_region_alerts(region: Region) -> list[Alert]:
     """
     Avalia regras de chuva intensa, vendaval e risco elevado para uma região
     (incluindo as últimas 12h recuperadas caso o servidor estivesse desligado),
-    garantindo deduplicação por dia/regra/região (campo dedup_key).
+    sem repetir a mesma regra na mesma região dentro de ALERT_REPEAT_HOURS.
     """
     now_utc = datetime.now(timezone.utc)
     current_hour_floor = now_utc.replace(minute=0, second=0, microsecond=0)
     past_12h_cutoff = now_utc - timedelta(hours=12)
-    day_key = now_utc.strftime("%Y-%m-%d")
+    repeat_cutoff = (now_utc - timedelta(hours=ALERT_REPEAT_HOURS)).replace(tzinfo=None)
 
     # 1. Previsões futuras (próximas 24h)
     forecasts = (
@@ -136,10 +140,20 @@ def evaluate_region_alerts(region: Region) -> list[Alert]:
 
     created_alerts = []
     for rule_code, rule_desc in triggered_rules:
-        dedup_key = f"reg{region.id}_{rule_code}_{day_key}"
-        exists = Alert.query.filter_by(dedup_key=dedup_key).first()
-        if exists:
+        # Prefixo comum ao formato novo e ao antigo (reg{id}_{regra}_{AAAA-MM-DD}).
+        key_prefix = f"reg{region.id}_{rule_code}_"
+        recent = (
+            Alert.query
+            .filter(
+                Alert.region_id == region.id,
+                Alert.dedup_key.startswith(key_prefix, autoescape=True),
+                Alert.created_at >= repeat_cutoff,
+            )
+            .first()
+        )
+        if recent:
             continue
+        dedup_key = f"{key_prefix}{now_utc:%Y%m%dT%H%M%S}"
 
         subject = f"[CLIMAE Alerta] {region.municipality} ({region.name}) — {rule_code}"
         status = send_email_notification(subject, rule_desc)

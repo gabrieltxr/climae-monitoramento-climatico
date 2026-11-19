@@ -52,7 +52,7 @@ def test_risk_inconclusive_when_no_weather(client):
 
 
 def test_risk_and_alert_deduplication(client):
-    """Valida cálculo de risco elevado e garante que o alerta não duplica no mesmo dia."""
+    """Valida cálculo de risco elevado e garante que o alerta não se repete na janela de 12h."""
     with client.application.app_context():
         reg = Region.query.first()
         now = datetime.now(timezone.utc)
@@ -82,7 +82,7 @@ def test_risk_and_alert_deduplication(client):
         first_run = evaluate_region_alerts(reg)
         assert len(first_run) >= 2
 
-        # 2ª execução no mesmo dia: deve retornar 0 novos alertas (deduplicação funcionando)
+        # 2ª execução logo em seguida: deve retornar 0 novos alertas (deduplicação funcionando)
         second_run = evaluate_region_alerts(reg)
         assert len(second_run) == 0
         assert Alert.query.count() == len(first_run)
@@ -1256,3 +1256,118 @@ def test_weather_api_exposes_station(client):
     assert station["code"] == "A802"
     assert station["observed_at"].endswith("+00:00")
     assert station["rain_12h_mm"] is None
+
+
+# --- Region.city e manutenção de regiões ---
+
+def test_region_city_synonym_works_in_queries(client):
+    assert Region.query.filter_by(city="Rio Grande").count() == 1
+    assert Region.query.filter(Region.city == "Rio Grande").count() == 1
+    reg = Region.query.first()
+    reg.city = "Pelotas"
+    db.session.commit()
+    assert Region.query.filter_by(municipality="Pelotas").count() == 1
+    assert Region(city="Chuí", name="X", latitude=0, longitude=0).municipality == "Chuí"
+
+
+def _seed_region_rows(region_id, hour):
+    from app.models import RiskAssessment, MonthlyClimateSummary, PowerOutageReport
+    db.session.add_all([
+        WeatherObservation(region_id=region_id, observed_at=hour, is_forecast=False,
+                           precipitation_mm=1.0, source="modelo"),
+        Alert(region_id=region_id, triggered_rule="teste", channel="painel", status="ok",
+              dedup_key=f"reg{region_id}_TESTE"),
+        RiskAssessment(region_id=region_id, risk_level="Baixo", score=10, method_version="t"),
+        Occurrence(region_id=region_id, event_type="Alagamento", occurred_at=hour, source="teste"),
+        MonthlyClimateSummary(region_id=region_id, year=2026, month=10, total_rain_mm=80),
+        PowerOutageReport(region_id=region_id, reporter_hash="h" * 64),
+    ])
+    db.session.commit()
+
+
+def test_region_dependent_columns_cover_all_region_tables():
+    from app.services.region_maintenance import region_dependent_columns
+    tables = {model.__tablename__ for model, _ in region_dependent_columns()}
+    assert {"weather_observations", "alerts", "risk_assessments", "occurrences",
+            "monthly_climate_summaries", "power_outage_reports", "power_restoration_reports",
+            "power_utility_bulletins", "traffic_events"} <= tables
+    assert "station_observations" not in tables
+
+
+def test_merge_region_moves_every_table_and_drops_overlaps(client):
+    from app.models import RiskAssessment, MonthlyClimateSummary, PowerOutageReport
+    from app.services.region_maintenance import merge_region_into
+    hour = datetime(2026, 11, 19, 12)
+    target = Region.query.first()
+    old = Region(municipality="Rio Grande", name="Centro", latitude=-32.03, longitude=-52.09)
+    db.session.add(old)
+    db.session.commit()
+    _seed_region_rows(old.id, hour)
+    # O destino já tem a mesma hora e o mesmo mês: os da antiga são descartados.
+    db.session.add_all([
+        WeatherObservation(region_id=target.id, observed_at=hour, is_forecast=False,
+                           precipitation_mm=2.0, source="modelo"),
+        MonthlyClimateSummary(region_id=target.id, year=2026, month=10, total_rain_mm=90),
+    ])
+    db.session.commit()
+    old_id = old.id
+
+    result = merge_region_into(old, target)
+
+    assert db.session.get(Region, old_id) is None
+    assert result["dropped_duplicates"] == {"monthly_climate_summaries": 1, "weather_observations": 1}
+    for model in (Alert, RiskAssessment, Occurrence, PowerOutageReport):
+        assert model.query.filter_by(region_id=old_id).count() == 0
+        assert model.query.filter_by(region_id=target.id).count() == 1
+    assert WeatherObservation.query.filter_by(region_id=target.id).one().precipitation_mm == 2.0
+    assert MonthlyClimateSummary.query.filter_by(region_id=target.id).one().total_rain_mm == 90
+
+
+def test_delete_region_removes_dependents(client):
+    from app.models import RiskAssessment, MonthlyClimateSummary, PowerOutageReport
+    from app.services.region_maintenance import delete_region_with_dependents
+    reg = Region(municipality="Chuí", name="Espúria", latitude=-33.6, longitude=-53.4)
+    db.session.add(reg)
+    db.session.commit()
+    reg_id = reg.id
+    _seed_region_rows(reg_id, datetime(2026, 11, 19, 12))
+
+    deleted = delete_region_with_dependents(reg)
+
+    assert db.session.get(Region, reg_id) is None
+    assert deleted["alerts"] == 1 and deleted["power_outage_reports"] == 1
+    for model in (WeatherObservation, Alert, RiskAssessment, Occurrence, MonthlyClimateSummary, PowerOutageReport):
+        assert model.query.filter_by(region_id=reg_id).count() == 0
+    assert Region.query.count() == 1
+
+
+# --- Deduplicação de alertas por janela de 12h ---
+
+def test_alert_repeat_window_ignores_utc_day_turnover(client):
+    """Alerta de ontem (formato antigo de chave) 1h atrás segura a regra; após 12h volta a disparar."""
+    from datetime import timedelta
+    reg = Region.query.first()
+    now = datetime.now(timezone.utc)
+    db.session.add(WeatherObservation(region_id=reg.id, observed_at=now + timedelta(hours=1),
+                                      is_forecast=True, precipitation_mm=40.0, source="modelo"))
+    yesterday = (now - timedelta(days=1)).strftime("%Y-%m-%d")
+    previous = Alert(region_id=reg.id, triggered_rule="chuva", channel="painel", status="ok",
+                     created_at=(now - timedelta(hours=1)).replace(tzinfo=None),
+                     dedup_key=f"reg{reg.id}_CHUVA_INTENSA_24H_{yesterday}")
+    db.session.add(previous)
+    db.session.commit()
+
+    def rain_alerts(alerts):
+        return [a for a in alerts if "_CHUVA_INTENSA_24H_" in a.dedup_key]
+
+    assert rain_alerts(evaluate_region_alerts(reg)) == []
+
+    previous.created_at = (now - timedelta(hours=13)).replace(tzinfo=None)
+    db.session.commit()
+    created = rain_alerts(evaluate_region_alerts(reg))
+    assert len(created) == 1
+    assert created[0].dedup_key.startswith(f"reg{reg.id}_CHUVA_INTENSA_24H_")
+    assert created[0].dedup_key != previous.dedup_key
+
+    # Logo em seguida (mesmo ciclo ou o próximo): não repete.
+    assert rain_alerts(evaluate_region_alerts(reg)) == []
