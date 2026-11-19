@@ -6,7 +6,7 @@ from flask_migrate import Migrate
 from sqlalchemy import event
 from sqlalchemy.engine import Engine
 from app.config import Config
-from app.models import db
+from app.models import db, StationObservation
 from app.routes.main import main_bp
 
 migrate = Migrate()
@@ -36,6 +36,13 @@ def create_app(config_class=Config):
     migrate.init_app(app, db)
 
     app.register_blueprint(main_bp)
+
+    # Tabela nova (medições INMET) criada se faltar: o projeto ainda não tem migrations/.
+    with app.app_context():
+        try:
+            StationObservation.__table__.create(db.engine, checkfirst=True)
+        except Exception as exc:
+            app.logger.warning("Não foi possível criar a tabela station_observations: %s", exc)
 
     # Só confia em X-Forwarded-For quando há proxy reverso declarado (ex.: Nginx = 1).
     trusted_proxies = int(os.getenv("TRUSTED_PROXY_COUNT", "0") or 0)

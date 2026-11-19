@@ -5,6 +5,7 @@ from flask import Blueprint, render_template, jsonify, request
 from app.models import db, Region, WeatherObservation, Occurrence, RiskAssessment, Alert, TrafficEvent, MonthlyClimateSummary
 from app.services.risk_engine import calculate_region_risk
 from app.collectors.traffic_collector import get_traffic_panel_data, update_highway_conditions
+from app.collectors.inmet import get_region_station_summary
 
 main_bp = Blueprint('main', __name__)
 
@@ -65,8 +66,14 @@ def api_region_weather(region_id):
     # Sem fallback para previsões vencidas: se não houver horários futuros,
     # a previsão retorna vazia em vez de exibir dados passados como "próximas 24h".
 
+    # Medição da estação INMET mais próxima (None sem token, fora do raio ou estação parada).
+    station = get_region_station_summary(region)
+    if station:
+        station = {**station, "observed_at": to_utc_iso(station["observed_at"])}
+
     return jsonify({
         "region": region.to_dict(),
+        "station": station,
         "current": {
             "observed_at": to_utc_iso(current_obs.observed_at) if current_obs else None,
             "collected_at": to_utc_iso(current_obs.collected_at) if current_obs and current_obs.collected_at else None,

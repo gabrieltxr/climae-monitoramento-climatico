@@ -7,9 +7,11 @@
 
 Aplicação web modular em Python (Flask) desenvolvida para monitoramento meteorológico baseado em modelos numéricos, avaliação contínua de risco geoespacial, telemetria rodoviária e análise climatológica histórica para **56 regiões e bairros distribuídos em 8 municípios da Zona Sul do Rio Grande do Sul**.
 
-> **Sobre os dados meteorológicos:** o CLIMAE ainda não usa medições de estações. As
-> condições "atuais" e das últimas 12 horas são **estimativas dos modelos** (ECMWF, GFS e
-> ICON, via API de previsão do Open-Meteo), não leituras de pluviômetro ou anemômetro.
+> **Sobre os dados meteorológicos:** as condições "atuais" e das últimas 12 horas do
+> painel são **estimativas dos modelos** (ECMWF, GFS e ICON, via API de previsão do
+> Open-Meteo), não leituras de pluviômetro ou anemômetro. Com um token do INMET
+> configurado, o painel também mostra a medição da estação automática mais próxima
+> (até 30 km) e os alertas das últimas 12h passam a usar o dado medido (ver seção 3).
 
 ---
 
@@ -129,6 +131,15 @@ Acesse a aplicação no navegador em: **`http://127.0.0.1:5000`**
 > própria no `.env` (`python -c "import secrets; print(secrets.token_hex(32))"`).
 > Com `CLIMAE_HOST` fora de 127.0.0.1, o `run.py` recusa subir com chave vazia ou
 > pública. Via WSGI essa verificação não roda: defina a chave antes de publicar.
+
+> **Estações do INMET (opcional):** peça um token por e-mail a `cadastro.act@inmet.gov.br`
+> e coloque-o em `INMET_TOKEN` no `.env`. A cada ciclo o agendador lê ontem e hoje das 10
+> estações automáticas da região (Rio Grande, Capão do Leão/Pelotas, Jaguarão, Canguçu,
+> São Lourenço do Sul, Barra do Chuí, Santa Vitória do Palmar, Taim, Herval e Pinheiro
+> Machado). Cada bairro usa a estação mais próxima que esteja publicando, dentro de
+> `INMET_MAX_DISTANCE_KM` (padrão 30 km); fora do raio — hoje, parte de São José do Norte
+> e de Santa Vitória do Palmar — segue só com os modelos. São dados brutos (o INMET não os
+> valida) e ficam guardados por 7 dias.
 
 ---
 

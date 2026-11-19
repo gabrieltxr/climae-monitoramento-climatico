@@ -1124,3 +1124,135 @@ def test_seed_does_not_save_partial_month(client):
         saved = {(r.year, r.month) for r in MonthlyClimateSummary.query.filter(
             MonthlyClimateSummary.region_id == region.id, MonthlyClimateSummary.year > 0)}
         assert saved == {(2026, 9)}
+
+
+# --- Estações INMET (medição real) ---
+
+def _inmet_row(dt, chuva="0.0", vel="2.0", tem="20.1"):
+    return {
+        "DT_MEDICAO": dt.strftime("%Y-%m-%d"), "HR_MEDICAO": dt.strftime("%H00"),
+        "CHUVA": chuva, "TEM_INS": tem, "UMD_INS": "80", "VEN_VEL": vel,
+        "VEN_RAJ": "5.0", "VEN_DIR": "180", "PRE_INS": "1012.3", "CD_ESTACAO": "A802",
+    }
+
+
+def test_inmet_parse_row_converts_units_and_skips_empty():
+    from app.collectors.inmet import parse_inmet_row
+    row = parse_inmet_row({"DT_MEDICAO": "2026-11-19", "HR_MEDICAO": "1300", "CHUVA": "1.2",
+                           "TEM_INS": "25.4", "VEN_VEL": "10", "VEN_RAJ": None, "UMD_INS": "-9999"})
+    assert row["observed_at"] == datetime(2026, 11, 19, 13, tzinfo=timezone.utc)
+    assert row["precipitation_mm"] == 1.2
+    assert row["wind_speed_kmh"] == 36.0
+    assert row["wind_gust_kmh"] is None
+    assert row["humidity_percent"] is None
+    assert parse_inmet_row({"DT_MEDICAO": "2026-11-19", "HR_MEDICAO": "1300"}) is None
+    assert parse_inmet_row({"DT_MEDICAO": "", "HR_MEDICAO": "1300", "CHUVA": "1"}) is None
+
+
+def test_inmet_collect_without_token_does_nothing(client, monkeypatch):
+    from app.collectors import inmet
+    monkeypatch.delenv("INMET_TOKEN", raising=False)
+
+    def boom(*a, **k):
+        raise AssertionError("não deveria chamar a API sem token")
+    monkeypatch.setattr(inmet.http_session, "get", boom)
+    assert inmet.collect_inmet_stations()["status"] == "sem_token"
+
+
+def test_inmet_collect_saves_rows_and_upserts(client, monkeypatch):
+    from app.collectors import inmet
+    from app.models import StationObservation
+    monkeypatch.setenv("INMET_TOKEN", "tok-teste")
+    monkeypatch.delenv("INMET_URL_TEMPLATE", raising=False)
+    now = datetime(2026, 11, 19, 15, tzinfo=timezone.utc)
+    urls = []
+
+    class Resp:
+        def __init__(self, code, payload=None):
+            self.status_code, self._payload = code, payload
+        def json(self):
+            return self._payload
+
+    def fake_get(url, timeout=None):
+        urls.append(url)
+        if "/A802/" in url:
+            return Resp(200, [_inmet_row(datetime(2026, 11, 19, 14)), _inmet_row(datetime(2026, 11, 19, 15))])
+        if "/A887/" in url:
+            return Resp(500)
+        return Resp(204)
+    monkeypatch.setattr(inmet.http_session, "get", fake_get)
+
+    first = inmet.collect_inmet_stations(now=now)
+    assert first["inserted"] == 2 and first["failed"] == ["A887"]
+    assert "/2026-11-18/2026-11-19/A802/tok-teste" in urls[0]
+    second = inmet.collect_inmet_stations(now=now)
+    assert second["inserted"] == 0 and second["updated"] == 2
+    assert StationObservation.query.count() == 2
+
+
+def test_inmet_region_summary_uses_nearest_publishing_station(client):
+    from datetime import timedelta
+    from app.collectors.inmet import get_region_station_summary, save_station_rows
+    now = datetime(2026, 11, 19, 15, 20, tzinfo=timezone.utc)
+    base = now.replace(minute=0)
+    region = Region.query.first()  # Rio Grande Centro: A802 a ~6 km
+    assert get_region_station_summary(region, now=now) is None
+
+    # Leitura velha (5h atrás) na A802 = estação parada; sem outra no raio de 30 km.
+    save_station_rows("A802", [_inmet_row(base - timedelta(hours=5))])
+    assert get_region_station_summary(region, now=now) is None
+
+    save_station_rows("A802", [_inmet_row(base - timedelta(hours=h), chuva="2.5", vel="5") for h in range(10)])
+    summary = get_region_station_summary(region, now=now)
+    assert summary["code"] == "A802" and summary["distance_km"] < 10
+    assert summary["hours_12h"] == 10
+    assert summary["rain_12h_mm"] == 25.0
+    assert summary["peak_wind_12h_kmh"] == 18.0
+
+    far = Region(municipality="Chuí", name="Teste longe", latitude=-33.20, longitude=-52.40)
+    db.session.add(far)
+    db.session.commit()
+    assert get_region_station_summary(far, now=now) is None
+
+
+def test_inmet_window_needs_nine_hours(client):
+    from datetime import timedelta
+    from app.collectors.inmet import get_region_station_summary, save_station_rows
+    now = datetime(2026, 11, 19, 15, 20, tzinfo=timezone.utc)
+    base = now.replace(minute=0)
+    save_station_rows("A802", [_inmet_row(base - timedelta(hours=h), chuva="9") for h in range(4)])
+    summary = get_region_station_summary(Region.query.first(), now=now)
+    assert summary["temperature_c"] == 20.1
+    assert summary["rain_12h_mm"] is None and summary["peak_wind_12h_kmh"] is None
+
+
+def test_alert_uses_measured_station_rain(client):
+    from datetime import timedelta
+    from app.collectors.inmet import save_station_rows
+    now = datetime.now(timezone.utc)
+    base = now.replace(minute=0, second=0, microsecond=0)
+    region = Region.query.first()
+    # Modelo estima 0 mm no passado; a estação mediu 3 mm/h por 10 horas = 30 mm.
+    db.session.add(WeatherObservation(region_id=region.id, observed_at=base - timedelta(hours=1),
+                                      is_forecast=False, precipitation_mm=0.0, wind_speed=5.0, source="modelo"))
+    db.session.commit()
+    save_station_rows("A802", [_inmet_row(base - timedelta(hours=h), chuva="3.0") for h in range(10)])
+
+    alerts = evaluate_region_alerts(region)
+    rain = [a for a in alerts if "CHUVA_INTENSA_24H" in a.dedup_key]
+    assert rain, "alerta de chuva deveria disparar com a medição da estação"
+    assert "medida na estação INMET A802" in rain[0].triggered_rule
+    assert len(rain[0].triggered_rule) <= 100
+
+
+def test_weather_api_exposes_station(client):
+    from datetime import timedelta
+    from app.collectors.inmet import save_station_rows
+    base = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0)
+    region_id = Region.query.first().id
+    assert client.get(f"/api/weather/{region_id}").get_json()["station"] is None
+    save_station_rows("A802", [_inmet_row(base - timedelta(hours=1))])
+    station = client.get(f"/api/weather/{region_id}").get_json()["station"]
+    assert station["code"] == "A802"
+    assert station["observed_at"].endswith("+00:00")
+    assert station["rain_12h_mm"] is None

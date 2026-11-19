@@ -1263,6 +1263,8 @@
                     <div class="metric-value" id="valProb">--<span class="metric-unit">%</span></div>
                 </div>
             </div>
+            <!-- Medição real da estação INMET mais próxima (só aparece quando há dado) -->
+            <div class="meta-info" id="stationMeta" style="display:none; margin-top:8px;"></div>
 
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 0.55rem; flex-wrap:wrap;">
                 <span class="meta-info">Tendência Horária — Próximas 24h (Horário de Brasília)</span>
@@ -2613,6 +2615,20 @@
                 document.getElementById('valProb').innerHTML = `${cur.rain_probability ?? '--'}<span class="metric-unit">%</span>`;
                 document.getElementById('weatherMeta').innerText =
                     `Fonte: ${cur.source} • Atualizado: ${formatBRT(cur.observed_at)} (Horário de Brasília • Ciclo: 15 min)`;
+            }
+
+            const stationEl = document.getElementById('stationMeta');
+            const st = data.station;
+            if (st) {
+                const fmt = (v, unit) => (v === null || v === undefined) ? '--' : `${v} ${unit}`;
+                stationEl.innerText =
+                    `📡 Medido na estação INMET ${st.code} ${st.name} (${st.distance_km} km) às ${formatBRT(st.observed_at)}: ` +
+                    `${fmt(st.temperature_c, '°C')} • umidade ${fmt(st.humidity_percent, '%')} • ` +
+                    `vento ${fmt(st.wind_speed_kmh, 'km/h')} • chuva 12h ${fmt(st.rain_12h_mm, 'mm')} (dado bruto, sem validação)`;
+                stationEl.style.display = '';
+            } else {
+                stationEl.innerText = '';
+                stationEl.style.display = 'none';
             }
 
             if (data.region && map) {

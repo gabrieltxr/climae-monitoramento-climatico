@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, timezone
 from email.message import EmailMessage
 from app.models import db, Region, WeatherObservation, Alert
 from app.services.risk_engine import calculate_region_risk
+from app.collectors.inmet import get_region_station_summary
 
 logger = logging.getLogger(__name__)
 
@@ -87,10 +88,26 @@ def evaluate_region_alerts(region: Region) -> list[Alert]:
 
     rain_forecast_24h = sum((f.precipitation_mm or 0.0) for f in forecasts)
     rain_past_12h = sum((o.precipitation_mm or 0.0) for o in recent_observed)
-    effective_rain = max(rain_forecast_24h, rain_past_12h)
 
     peak_wind_forecast = max([f.wind_speed or 0.0 for f in forecasts], default=0.0)
     peak_wind_observed = max([o.wind_speed or 0.0 for o in recent_observed], default=0.0)
+
+    # 3. Estação INMET no raio com ao menos 9 das últimas 12h: a medição substitui a
+    #    estimativa do modelo para o passado (a previsão continua vindo dos modelos).
+    past_rain_label = "estimada pelo modelo (últimas 12h)"
+    past_wind_label = "estimado pelo modelo nas últimas 12h"
+    station = get_region_station_summary(region, now=now_utc)
+    if station:
+        # Só o código: triggered_rule é String(100).
+        station_ref = f"na estação INMET {station['code']}"
+        if station["rain_12h_mm"] is not None:
+            rain_past_12h = station["rain_12h_mm"]
+            past_rain_label = f"medida {station_ref} (últimas 12h)"
+        if station["peak_wind_12h_kmh"] is not None:
+            peak_wind_observed = station["peak_wind_12h_kmh"]
+            past_wind_label = f"medido {station_ref} nas últimas 12h"
+
+    effective_rain = max(rain_forecast_24h, rain_past_12h)
     peak_wind = max(peak_wind_forecast, peak_wind_observed)
 
     risk_assessment = calculate_region_risk(region)
@@ -98,14 +115,14 @@ def evaluate_region_alerts(region: Region) -> list[Alert]:
     triggered_rules = []
 
     if effective_rain >= RAIN_ALERT_MM:
-        origem_chuva = "prevista (24h)" if rain_forecast_24h >= rain_past_12h else "estimada pelo modelo (últimas 12h)"
+        origem_chuva = "prevista (24h)" if rain_forecast_24h >= rain_past_12h else past_rain_label
         triggered_rules.append((
             "CHUVA_INTENSA_24H",
             f"Chuva acumulada {origem_chuva} de {effective_rain:.1f} mm (Limiar: {RAIN_ALERT_MM} mm)"
         ))
 
     if peak_wind >= WIND_ALERT_KMH:
-        origem_vento = "previsto" if peak_wind_forecast >= peak_wind_observed else "estimado pelo modelo nas últimas 12h"
+        origem_vento = "previsto" if peak_wind_forecast >= peak_wind_observed else past_wind_label
         triggered_rules.append((
             "VENDAVAL_PREVISTO",
             f"Vento {origem_vento} de {peak_wind:.1f} km/h (Limiar: {WIND_ALERT_KMH} km/h)"
