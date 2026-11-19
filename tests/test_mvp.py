@@ -677,6 +677,17 @@ def test_run_server_settings_never_expose_debugger():
     assert resolve_server_settings({"CLIMAE_PORT": "8080"})[1] == 8080
 
 
+def test_secret_key_check_blocks_public_key_when_exposed():
+    """Chave vazia/pública: exposto na rede não sobe; local sobe com aviso; chave própria sobe."""
+    from run import check_secret_key
+    for weak in (None, "", "dev-secret-key", "chave-secreta-desenvolvimento-mvp"):
+        can_start, msg = check_secret_key(weak, "0.0.0.0")
+        assert can_start is False and "NÃO iniciado" in msg
+        can_start, msg = check_secret_key(weak, "127.0.0.1")
+        assert can_start is True and msg
+    assert check_secret_key("a" * 64, "0.0.0.0") == (True, None)
+
+
 def test_bulletin_post_requires_admin_token(client, monkeypatch):
     """Boletins 'oficiais' só podem ser criados com o token administrativo correto."""
     from app.models import PowerUtilityBulletin

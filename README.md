@@ -121,6 +121,11 @@ Acesse a aplicação no navegador em: **`http://127.0.0.1:5000`**
 > agendador em **um único** processo separado com `python scripts/run_scheduler.py`
 > (e não rode `run.py` ao mesmo tempo, para não duplicar as coletas).
 
+> **SECRET_KEY:** é o sal do hash anônimo dos relatos de energia. Defina uma chave
+> própria no `.env` (`python -c "import secrets; print(secrets.token_hex(32))"`).
+> Com `CLIMAE_HOST` fora de 127.0.0.1, o `run.py` recusa subir com chave vazia ou
+> pública. Via WSGI essa verificação não roda: defina a chave antes de publicar.
+
 ---
 
 ## 4. Scripts e Utilitários de Manutenção
