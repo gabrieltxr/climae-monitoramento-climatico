@@ -103,7 +103,7 @@ venv\Scripts\activate      # Windows (PowerShell / CMD)
 # 3. Instalar as dependências
 pip install -r requirements.txt
 
-# 4. Inicializar o banco de dados e popular as 56 regiões
+# 4. Criar o banco (aplica as migrations) e popular as 56 regiões
 python scripts/seed_regions.py
 python scripts/seed_occurrences.py
 
@@ -145,13 +145,28 @@ Acesse a aplicação no navegador em: **`http://127.0.0.1:5000`**
 
 ## 4. Scripts e Utilitários de Manutenção
 
-* `scripts/seed_regions.py`: Cadastra ou atualiza as 56 regiões no banco de dados SQLite.
+* `scripts/seed_regions.py`: Cria/atualiza o esquema do banco (migrations) e cadastra ou atualiza as 56 regiões.
 * `scripts/seed_occurrences.py`: Insere a base histórica de ocorrências documentadas.
 * `scripts/collect_weather.py`: Executa um ciclo manual de coleta meteorológica e avaliação de risco.
 * `scripts/run_scheduler.py`: Executa só o agendador (coleta, purga e consolidação mensal) em processo próprio, para uso com servidor WSGI.
 * `scripts/sync_climate_history.py`: Audita a integridade do banco e sincroniza a climatologia ERA5 das 56 regiões.
 * `scripts/seed_monthly_climate.py`: Rotina avançada de carga direta da API ERA5 Open-Meteo.
 * `scripts/cleanup_all_regions.py`: Limpeza e reestruturação atômica das regiões.
+
+### Esquema do banco (migrations)
+
+O esquema é versionado com Flask-Migrate (Alembic), na pasta `migrations/`.
+
+* `python run.py`, `scripts/run_scheduler.py`, `scripts/seed_regions.py` e
+  `scripts/seed_monthly_climate.py` aplicam sozinhos as migrations pendentes ao iniciar.
+* Bancos criados antes das migrations (por `db.create_all()`) são reconhecidos e marcados
+  na revisão inicial, sem recriar nem apagar dados.
+* **Servindo via WSGI:** aplique antes de subir os workers: `flask db upgrade`
+  (com `FLASK_APP=run.py`, já definido no `.env.example`).
+* **Mudou um modelo?** Gere a migration com `flask db migrate -m "descrição"`, revise o
+  arquivo criado em `migrations/versions/` e aplique com `flask db upgrade`. Um teste
+  falha se algum modelo ficar diferente das migrations.
+* Antes de aplicar no banco de produção, pare o servidor e faça uma cópia do arquivo `.db`.
 
 ### Publicar boletins oficiais de energia
 

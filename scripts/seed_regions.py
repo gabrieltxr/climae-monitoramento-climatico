@@ -6,6 +6,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from app import create_app
 from app.models import db, Region
+from app.db_schema import ensure_schema
 from app.regions_catalog import REGIONS
 
 # scripts/seed_regions.py
@@ -34,7 +35,7 @@ def seed_all_regions(db_session, RegionModel):
 def seed():
     app = create_app()
     with app.app_context():
-        db.create_all()
+        ensure_schema()
         seed_all_regions(db.session, Region)
 
 if __name__ == "__main__":

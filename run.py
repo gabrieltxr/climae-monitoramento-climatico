@@ -4,6 +4,7 @@ from app import create_app
 from app.config import INSECURE_SECRET_KEYS
 from app.scheduler import init_scheduler
 from scripts.preflight_check import run_preflight
+from app.db_schema import ensure_schema
 
 app = create_app()
 
@@ -58,6 +59,9 @@ if __name__ == "__main__":
 
     # Executa a validação de APIs e Banco apenas no processo principal antes de subir
     if os.environ.get("WERKZEUG_RUN_MAIN") != "true":
+        # Aplica as migrations pendentes (e marca bancos antigos) antes de subir.
+        with app.app_context():
+            ensure_schema()
         run_preflight(strict=False)
 
     # Define o modo debug ANTES de iniciar o agendador: com o reloader ativo, ele só

@@ -21,6 +21,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from app import create_app
 from app.models import db, Region, MonthlyClimateSummary
+from app.db_schema import ensure_schema
 from app.services.monthly_consolidation import get_closed_month, is_era5_available
 
 ARCHIVE_URL = "https://archive-api.open-meteo.com/v1/archive"
@@ -201,7 +202,7 @@ def aggregate_and_save_region(region: Region, daily_data: dict) -> dict:
 def run_seed_monthly_climate(force_reseed: bool = False):
     app = create_app()
     with app.app_context():
-        db.create_all()
+        ensure_schema()
         regions = Region.query.order_by(Region.municipality, Region.name).all()
         end_date = get_seed_end_date()
 

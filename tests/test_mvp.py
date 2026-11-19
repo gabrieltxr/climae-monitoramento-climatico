@@ -1531,3 +1531,55 @@ def test_readme_region_list_matches_catalog():
     listed = {city: {i.strip() for i in items.split(",")}
               for city, items in re.findall(r"^\d\. \*\*(.+?):\*\* (.+)\.$", readme, re.M)}
     assert listed == expected
+
+
+# --- Migrations (Flask-Migrate) ---
+
+def _file_db_app(tmp_path, name):
+    class FileConfig:
+        TESTING = True
+        SQLALCHEMY_DATABASE_URI = "sqlite:///" + (tmp_path / name).as_posix()
+        SQLALCHEMY_TRACK_MODIFICATIONS = False
+    return create_app(FileConfig)
+
+
+def _schema_diffs():
+    from alembic.autogenerate import compare_metadata
+    from alembic.migration import MigrationContext
+    with db.engine.connect() as conn:
+        ctx = MigrationContext.configure(conn, opts={"render_as_batch": True})
+        return compare_metadata(ctx, db.metadata)
+
+
+def test_migrations_build_exactly_the_models(tmp_path):
+    """Falha se algum modelo mudar sem uma migration correspondente (flask db migrate)."""
+    from sqlalchemy import inspect
+    from app.db_schema import ensure_schema
+    app = _file_db_app(tmp_path, "novo.db")
+    with app.app_context():
+        assert ensure_schema() == "criado"
+        assert _schema_diffs() == []
+        assert "station_observations" in inspect(db.engine).get_table_names()
+        assert ensure_schema() == "atualizado"
+        db.engine.dispose()
+
+
+def test_legacy_create_all_database_is_stamped_and_upgraded(tmp_path):
+    """Banco antigo (create_all, sem alembic_version, sem a tabela do INMET) não é recriado."""
+    from sqlalchemy import inspect, text
+    from app.db_schema import ensure_schema
+    app = _file_db_app(tmp_path, "legado.db")
+    with app.app_context():
+        legacy_tables = [t for name, t in db.metadata.tables.items() if name != "station_observations"]
+        db.metadata.create_all(db.engine, tables=legacy_tables)
+        db.session.add(Region(municipality="Pelotas", name="Pelotas (Centro)", latitude=-31.7, longitude=-52.3))
+        db.session.commit()
+
+        assert ensure_schema() == "legado_marcado"
+        assert Region.query.count() == 1
+        assert "station_observations" in inspect(db.engine).get_table_names()
+        with db.engine.connect() as conn:
+            assert conn.execute(text("select version_num from alembic_version")).scalar() == "0002_station_observations"
+        assert _schema_diffs() == []
+        db.session.remove()
+        db.engine.dispose()
