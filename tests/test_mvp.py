@@ -822,6 +822,30 @@ def test_power_posts_have_global_ip_limit(client):
     assert client.post("/api/power/bulletins", json={}).status_code == 403
 
 
+def test_power_vote_region_id_is_normalized(client):
+    """'1', '01', 1.0 etc. não furam o teto por IP; tipos inválidos dão 400 e região inexistente 404."""
+    with client.application.app_context():
+        reg_id = Region.query.first().id
+    ip = {"REMOTE_ADDR": "9.9.9.9"}
+    codes = [
+        client.post("/api/power/report", json={"region_id": rid},
+                    headers={"User-Agent": repr(rid)}, environ_base=ip).status_code
+        for rid in (reg_id, str(reg_id), f"0{reg_id}", f" {reg_id} ")
+    ]
+    assert codes == [200, 200, 429, 429]
+    assert client.get(f"/api/power/status/{reg_id}").get_json()["reports_30m"] == 2
+
+    for bad in (1.0, True, "abc", [reg_id], {"a": 1}, -1, 0):
+        for route in ("/api/power/report", "/api/power/restore"):
+            res = client.post(route, json={"region_id": bad}, environ_base={"REMOTE_ADDR": "9.9.9.8"})
+            assert res.status_code == 400, (route, bad)
+    for route in ("/api/power/report", "/api/power/restore"):
+        assert client.post(route, json={}).status_code == 400
+        assert client.post(route, json=[1]).status_code == 400
+        assert client.post(route, json={"region_id": reg_id, "comment": ["x"]}).status_code == 400
+        assert client.post(route, json={"region_id": 99999}).status_code == 404
+
+
 def test_ip_report_limiter_window_and_regions():
     """A vaga libera quando o relato mais antigo sai da janela; regiões contam separado."""
     from datetime import timedelta

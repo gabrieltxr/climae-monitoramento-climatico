@@ -450,16 +450,54 @@ def api_power_status(region_id: int):
     return jsonify(status_data)
 
 
+def parse_region_id(value) -> int | None:
+    """
+    Normaliza o region_id do JSON para inteiro positivo. Aceita só int ou texto de dígitos;
+    recusa bool, float, listas e objetos. Os limitadores contam por (IP, região): sem essa
+    normalização, "1", "01" e 1.0 virariam regiões diferentes para eles e iguais para o banco.
+    """
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value if value > 0 else None
+    if isinstance(value, str):
+        text = value.strip()
+        if text.isascii() and text.isdigit() and int(text) > 0:
+            return int(text)
+    return None
+
+
+def _parse_power_vote():
+    """
+    Valida o corpo de /api/power/report e /api/power/restore.
+    Retorna (region_id, comentário, None) ou (None, None, resposta de erro).
+    """
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return None, None, (jsonify({"success": False, "error": "Corpo da requisição deve ser um objeto JSON."}), 400)
+
+    if data.get('region_id') in (None, ""):
+        return None, None, (jsonify({"success": False, "error": "ID da região é obrigatório."}), 400)
+    region_id = parse_region_id(data.get('region_id'))
+    if region_id is None:
+        return None, None, (jsonify({"success": False, "error": "ID da região inválido."}), 400)
+
+    comment = data.get('comment')
+    if comment is not None and not isinstance(comment, str):
+        return None, None, (jsonify({"success": False, "error": "Comentário deve ser texto."}), 400)
+
+    if db.session.get(Region, region_id) is None:
+        return None, None, (jsonify({"success": False, "error": "Região não encontrada."}), 404)
+    return region_id, comment, None
+
+
 @main_bp.route('/api/power/report', methods=['POST'])
 def api_power_report():
     """Registra um relato colaborativo de falta de energia com proteção anti-spam."""
     from app.services.power_service import generate_ip_key, generate_reporter_hash, record_power_outage_report
-    data = request.get_json() or {}
-    region_id = data.get('region_id')
-    comment = data.get('comment')
-
-    if not region_id:
-        return jsonify({"success": False, "error": "ID da região é obrigatório."}), 400
+    region_id, comment, error = _parse_power_vote()
+    if error:
+        return error
 
     reporter_hash = generate_reporter_hash(request)
     result = record_power_outage_report(region_id, reporter_hash, comment, ip_key=generate_ip_key(request))
@@ -471,12 +509,9 @@ def api_power_report():
 def api_power_restore():
     """Registra uma confirmação colaborativa de retorno da luz ("A Luz Voltou") com proteção anti-spam."""
     from app.services.power_service import generate_ip_key, generate_reporter_hash, record_power_restoration
-    data = request.get_json() or {}
-    region_id = data.get('region_id')
-    comment = data.get('comment')
-
-    if not region_id:
-        return jsonify({"success": False, "error": "ID da região é obrigatório."}), 400
+    region_id, comment, error = _parse_power_vote()
+    if error:
+        return error
 
     reporter_hash = generate_reporter_hash(request)
     result = record_power_restoration(region_id, reporter_hash, comment, ip_key=generate_ip_key(request))
