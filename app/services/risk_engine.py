@@ -20,7 +20,7 @@ def classify_score(score: float, is_provisional: bool = False) -> str:
     return level
 
 
-def calculate_region_risk(region: Region) -> RiskAssessment:
+def calculate_region_risk(region: Region, persist: bool = True) -> RiskAssessment:
     """
     Calcula o Índice de Risco Dinâmico (0 a 100) - Modelo Abordagem A:
     A vulnerabilidade histórica modula a ameaça meteorológica real,
@@ -30,6 +30,8 @@ def calculate_region_risk(region: Region) -> RiskAssessment:
     - 40% Precipitação (Volume acumulado + probabilidade ponderada pelo volume)
     - 35% Vulnerabilidade e histórico (Suscetibilidade ativada dinamicamente pela ameaça)
     - 25% Condições complementares (Vento efetivo > 25km/h, saturação atmosférica, trânsito)
+
+    persist=False calcula sem gravar (usado pelas rotas GET); só o agendador grava.
     """
     now_utc = datetime.now(timezone.utc)
     current_hour_floor = now_utc.replace(minute=0, second=0, microsecond=0)
@@ -62,8 +64,9 @@ def calculate_region_risk(region: Region) -> RiskAssessment:
             factors={"warning": "Dados meteorológicos ausentes para esta região."},
             method_version=METHOD_VERSION,
         )
-        db.session.add(assessment)
-        db.session.commit()
+        if persist:
+            db.session.add(assessment)
+            db.session.commit()
         return assessment
 
     # --- CATEGORIA 1: Precipitação prevista e acumulada (Máx: 40 pontos) ---
@@ -180,8 +183,9 @@ def calculate_region_risk(region: Region) -> RiskAssessment:
         factors=factors,
         method_version=METHOD_VERSION,
     )
-    db.session.add(assessment)
-    db.session.commit()
+    if persist:
+        db.session.add(assessment)
+        db.session.commit()
     return assessment
 
 

@@ -2708,7 +2708,8 @@
             const res = await fetch(`/api/risk/${regionId}`);
             const data = await res.json();
 
-            document.getElementById('riskMeta').innerText = `Método ${data.method_version} • ${formatBRT(data.assessed_at)}`;
+            document.getElementById('riskMeta').innerText = `Método ${data.method_version} • ${formatBRT(data.assessed_at)}` +
+                (data.calculado_agora ? ' (calculado agora; agendador sem avaliação recente)' : '');
             document.getElementById('riskScore').innerText = data.score !== null ? data.score : 'N/A';
 
             const badge = document.getElementById('riskBadge');

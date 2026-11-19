@@ -235,9 +235,25 @@ def api_occurrences():
         })
     return jsonify(result)
 
+# Dois ciclos de coleta (15 min): avaliação mais velha que isso indica agendador parado.
+RISK_MAX_AGE_MINUTES = int(os.getenv("RISK_MAX_AGE_MINUTES", "30"))
+
+
+def _is_older_than(dt, minutes: int) -> bool:
+    if dt is None:
+        return True
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return datetime.now(timezone.utc) - dt > timedelta(minutes=minutes)
+
+
 @main_bp.route('/api/risk/<int:region_id>')
 def api_region_risk(region_id):
-    """Retorna a avaliação de risco calculada mais recente para a região especificada."""
+    """
+    Avaliação de risco da região. Usa a gravada pelo agendador se tiver até
+    RISK_MAX_AGE_MINUTES; se estiver mais velha ou não existir, calcula na hora SEM gravar
+    (rota GET não escreve no banco) e marca calculado_agora=true.
+    """
     region = Region.query.get_or_404(region_id)
     assessment = (
         RiskAssessment.query
@@ -245,10 +261,13 @@ def api_region_risk(region_id):
         .order_by(RiskAssessment.assessed_at.desc())
         .first()
     )
-    if not assessment:
-        assessment = calculate_region_risk(region)
+    computed_now = False
+    if assessment is None or _is_older_than(assessment.assessed_at, RISK_MAX_AGE_MINUTES):
+        assessment = calculate_region_risk(region, persist=False)
+        computed_now = True
 
     return jsonify({
+        "calculado_agora": computed_now,
         "region": region.to_dict(),
         "assessed_at": to_utc_iso(assessment.assessed_at),
         "risk_level": assessment.risk_level,

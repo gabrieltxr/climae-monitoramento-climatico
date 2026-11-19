@@ -1438,3 +1438,47 @@ def test_weather_summary_batches_queries_and_picks_latest(client):
     blank = by_id[empty.id]
     assert blank["temperature_c"] is None and blank["observed_at"] is None
     assert blank["rain_next_24h_mm"] == 0 and blank["risk_level"] == "Baixo"
+
+
+# --- GET /api/risk não grava e não devolve avaliação velha ---
+
+def test_risk_get_never_writes_and_recomputes_stale(client):
+    from datetime import timedelta
+    from app.models import RiskAssessment
+    reg = Region.query.first()
+    now = datetime.now(timezone.utc)
+    db.session.add(WeatherObservation(region_id=reg.id, observed_at=now + timedelta(hours=1),
+                                      is_forecast=True, precipitation_mm=1.0, source="m"))
+    db.session.commit()
+
+    # Sem avaliação: calcula na hora, sem gravar.
+    data = client.get(f"/api/risk/{reg.id}").get_json()
+    assert data["calculado_agora"] is True
+    assert data["score"] is not None
+    assert RiskAssessment.query.count() == 0
+
+    # Avaliação recente do agendador: devolvida como está.
+    db.session.add(RiskAssessment(region_id=reg.id, assessed_at=(now - timedelta(minutes=10)).replace(tzinfo=None),
+                                  risk_level="Alto", score=61, method_version="agendador"))
+    db.session.commit()
+    data = client.get(f"/api/risk/{reg.id}").get_json()
+    assert data["calculado_agora"] is False
+    assert data["score"] == 61 and data["method_version"] == "agendador"
+
+    # Avaliação velha (agendador parado): recalcula sem gravar.
+    RiskAssessment.query.update({"assessed_at": (now - timedelta(days=21)).replace(tzinfo=None)})
+    db.session.commit()
+    data = client.get(f"/api/risk/{reg.id}").get_json()
+    assert data["calculado_agora"] is True
+    assert data["method_version"] != "agendador"
+    assert RiskAssessment.query.count() == 1
+
+
+def test_risk_engine_persist_flag(client):
+    from app.models import RiskAssessment
+    from app.services.risk_engine import calculate_region_risk
+    reg = Region.query.first()
+    calculate_region_risk(reg, persist=False)  # sem dados: Inconclusivo
+    assert RiskAssessment.query.count() == 0
+    calculate_region_risk(reg)
+    assert RiskAssessment.query.count() == 1
