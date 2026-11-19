@@ -1256,3 +1256,86 @@ def test_weather_api_exposes_station(client):
     assert station["code"] == "A802"
     assert station["observed_at"].endswith("+00:00")
     assert station["rain_12h_mm"] is None
+
+
+# --- Region.city e manutenção de regiões ---
+
+def test_region_city_synonym_works_in_queries(client):
+    assert Region.query.filter_by(city="Rio Grande").count() == 1
+    assert Region.query.filter(Region.city == "Rio Grande").count() == 1
+    reg = Region.query.first()
+    reg.city = "Pelotas"
+    db.session.commit()
+    assert Region.query.filter_by(municipality="Pelotas").count() == 1
+    assert Region(city="Chuí", name="X", latitude=0, longitude=0).municipality == "Chuí"
+
+
+def _seed_region_rows(region_id, hour):
+    from app.models import RiskAssessment, MonthlyClimateSummary, PowerOutageReport
+    db.session.add_all([
+        WeatherObservation(region_id=region_id, observed_at=hour, is_forecast=False,
+                           precipitation_mm=1.0, source="modelo"),
+        Alert(region_id=region_id, triggered_rule="teste", channel="painel", status="ok",
+              dedup_key=f"reg{region_id}_TESTE"),
+        RiskAssessment(region_id=region_id, risk_level="Baixo", score=10, method_version="t"),
+        Occurrence(region_id=region_id, event_type="Alagamento", occurred_at=hour, source="teste"),
+        MonthlyClimateSummary(region_id=region_id, year=2026, month=10, total_rain_mm=80),
+        PowerOutageReport(region_id=region_id, reporter_hash="h" * 64),
+    ])
+    db.session.commit()
+
+
+def test_region_dependent_columns_cover_all_region_tables():
+    from app.services.region_maintenance import region_dependent_columns
+    tables = {model.__tablename__ for model, _ in region_dependent_columns()}
+    assert {"weather_observations", "alerts", "risk_assessments", "occurrences",
+            "monthly_climate_summaries", "power_outage_reports", "power_restoration_reports",
+            "power_utility_bulletins", "traffic_events"} <= tables
+    assert "station_observations" not in tables
+
+
+def test_merge_region_moves_every_table_and_drops_overlaps(client):
+    from app.models import RiskAssessment, MonthlyClimateSummary, PowerOutageReport
+    from app.services.region_maintenance import merge_region_into
+    hour = datetime(2026, 11, 19, 12)
+    target = Region.query.first()
+    old = Region(municipality="Rio Grande", name="Centro", latitude=-32.03, longitude=-52.09)
+    db.session.add(old)
+    db.session.commit()
+    _seed_region_rows(old.id, hour)
+    # O destino já tem a mesma hora e o mesmo mês: os da antiga são descartados.
+    db.session.add_all([
+        WeatherObservation(region_id=target.id, observed_at=hour, is_forecast=False,
+                           precipitation_mm=2.0, source="modelo"),
+        MonthlyClimateSummary(region_id=target.id, year=2026, month=10, total_rain_mm=90),
+    ])
+    db.session.commit()
+    old_id = old.id
+
+    result = merge_region_into(old, target)
+
+    assert db.session.get(Region, old_id) is None
+    assert result["dropped_duplicates"] == {"monthly_climate_summaries": 1, "weather_observations": 1}
+    for model in (Alert, RiskAssessment, Occurrence, PowerOutageReport):
+        assert model.query.filter_by(region_id=old_id).count() == 0
+        assert model.query.filter_by(region_id=target.id).count() == 1
+    assert WeatherObservation.query.filter_by(region_id=target.id).one().precipitation_mm == 2.0
+    assert MonthlyClimateSummary.query.filter_by(region_id=target.id).one().total_rain_mm == 90
+
+
+def test_delete_region_removes_dependents(client):
+    from app.models import RiskAssessment, MonthlyClimateSummary, PowerOutageReport
+    from app.services.region_maintenance import delete_region_with_dependents
+    reg = Region(municipality="Chuí", name="Espúria", latitude=-33.6, longitude=-53.4)
+    db.session.add(reg)
+    db.session.commit()
+    reg_id = reg.id
+    _seed_region_rows(reg_id, datetime(2026, 11, 19, 12))
+
+    deleted = delete_region_with_dependents(reg)
+
+    assert db.session.get(Region, reg_id) is None
+    assert deleted["alerts"] == 1 and deleted["power_outage_reports"] == 1
+    for model in (WeatherObservation, Alert, RiskAssessment, Occurrence, MonthlyClimateSummary, PowerOutageReport):
+        assert model.query.filter_by(region_id=reg_id).count() == 0
+    assert Region.query.count() == 1

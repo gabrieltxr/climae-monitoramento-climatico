@@ -8,6 +8,9 @@ class Region(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(100), nullable=False)          # Ex: "Centro", "Cassino", "Zona Rural"
     municipality = db.Column(db.String(100), nullable=False)  # Ex: "Pelotas", "Rio Grande"
+    # Apelido de municipality: vale para leitura, escrita e consultas (filter_by(city=...)).
+    # Não declarar uma @property city depois disto: ela sobrescreve o synonym e
+    # filter_by(city=X) vira WHERE false, sem erro.
     city = db.synonym('municipality')
     latitude = db.Column(db.Float, nullable=False)
     longitude = db.Column(db.Float, nullable=False)
@@ -17,14 +20,6 @@ class Region(db.Model):
         if "city" in kwargs and "municipality" not in kwargs:
             kwargs["municipality"] = kwargs.pop("city")
         super().__init__(**kwargs)
-
-    @property
-    def city(self):
-        return self.municipality
-
-    @city.setter
-    def city(self, value):
-        self.municipality = value
 
     def to_dict(self):
         return {

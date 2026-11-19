@@ -7,7 +7,8 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 
 from app import create_app, db
 from app.config import Config
-from app.models import Region, WeatherObservation, MonthlyClimateSummary
+from app.models import Region
+from app.services.region_maintenance import merge_region_into, delete_region_with_dependents
 
 class CleanupConfig(Config):
     TESTING = True
@@ -112,15 +113,13 @@ with app.app_context():
 
     # 1. Resolver aliases e fundir dados
     for (city, old_name), target_canonical_name in ALIASES.items():
-        old_reg = Region.query.filter_by(city=city, name=old_name).first()
-        target_reg = Region.query.filter_by(city=city, name=target_canonical_name).first()
+        old_reg = Region.query.filter_by(municipality=city, name=old_name).first()
+        target_reg = Region.query.filter_by(municipality=city, name=target_canonical_name).first()
 
         if old_reg and target_reg and old_reg.id != target_reg.id:
             print(f" -> Fusão: Migrando dados de '{old_name}' (ID {old_reg.id}) para '{target_canonical_name}' (ID {target_reg.id})...")
-            WeatherObservation.query.filter_by(region_id=old_reg.id).update({"region_id": target_reg.id})
-            MonthlyClimateSummary.query.filter_by(region_id=old_reg.id).update({"region_id": target_reg.id})
-            db.session.delete(old_reg)
-            db.session.commit()
+            result = merge_region_into(old_reg, target_reg)
+            print(f"    movidos: {result['moved'] or 'nada'} | duplicados descartados: {result['dropped_duplicates'] or 'nenhum'}")
         elif old_reg and not target_reg:
             print(f" -> Renomeando: '{old_name}' para formato canônico '{target_canonical_name}' (ID {old_reg.id}).")
             old_reg.name = target_canonical_name
@@ -145,10 +144,9 @@ with app.app_context():
     for reg in all_current_regions:
         if reg.name not in canonical_names:
             print(f" -> Removendo registro espúrio/redundante: '{reg.name}' (Cidade: {reg.city}, ID: {reg.id})")
-            # Deleta observações órfãs associadas se existirem
-            WeatherObservation.query.filter_by(region_id=reg.id).delete()
-            MonthlyClimateSummary.query.filter_by(region_id=reg.id).delete()
-            db.session.delete(reg)
+            # Apaga junto tudo o que aponta para a região (alertas, riscos, relatos etc.).
+            deleted = delete_region_with_dependents(reg)
+            print(f"    linhas apagadas junto: {deleted or 'nenhuma'}")
             removed_count += 1
             
     db.session.commit()
