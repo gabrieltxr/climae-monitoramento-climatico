@@ -52,7 +52,7 @@ def test_risk_inconclusive_when_no_weather(client):
 
 
 def test_risk_and_alert_deduplication(client):
-    """Valida cálculo de risco elevado e garante que o alerta não duplica no mesmo dia."""
+    """Valida cálculo de risco elevado e garante que o alerta não se repete na janela de 12h."""
     with client.application.app_context():
         reg = Region.query.first()
         now = datetime.now(timezone.utc)
@@ -82,7 +82,7 @@ def test_risk_and_alert_deduplication(client):
         first_run = evaluate_region_alerts(reg)
         assert len(first_run) >= 2
 
-        # 2ª execução no mesmo dia: deve retornar 0 novos alertas (deduplicação funcionando)
+        # 2ª execução logo em seguida: deve retornar 0 novos alertas (deduplicação funcionando)
         second_run = evaluate_region_alerts(reg)
         assert len(second_run) == 0
         assert Alert.query.count() == len(first_run)
@@ -1339,3 +1339,35 @@ def test_delete_region_removes_dependents(client):
     for model in (WeatherObservation, Alert, RiskAssessment, Occurrence, MonthlyClimateSummary, PowerOutageReport):
         assert model.query.filter_by(region_id=reg_id).count() == 0
     assert Region.query.count() == 1
+
+
+# --- Deduplicação de alertas por janela de 12h ---
+
+def test_alert_repeat_window_ignores_utc_day_turnover(client):
+    """Alerta de ontem (formato antigo de chave) 1h atrás segura a regra; após 12h volta a disparar."""
+    from datetime import timedelta
+    reg = Region.query.first()
+    now = datetime.now(timezone.utc)
+    db.session.add(WeatherObservation(region_id=reg.id, observed_at=now + timedelta(hours=1),
+                                      is_forecast=True, precipitation_mm=40.0, source="modelo"))
+    yesterday = (now - timedelta(days=1)).strftime("%Y-%m-%d")
+    previous = Alert(region_id=reg.id, triggered_rule="chuva", channel="painel", status="ok",
+                     created_at=(now - timedelta(hours=1)).replace(tzinfo=None),
+                     dedup_key=f"reg{reg.id}_CHUVA_INTENSA_24H_{yesterday}")
+    db.session.add(previous)
+    db.session.commit()
+
+    def rain_alerts(alerts):
+        return [a for a in alerts if "_CHUVA_INTENSA_24H_" in a.dedup_key]
+
+    assert rain_alerts(evaluate_region_alerts(reg)) == []
+
+    previous.created_at = (now - timedelta(hours=13)).replace(tzinfo=None)
+    db.session.commit()
+    created = rain_alerts(evaluate_region_alerts(reg))
+    assert len(created) == 1
+    assert created[0].dedup_key.startswith(f"reg{reg.id}_CHUVA_INTENSA_24H_")
+    assert created[0].dedup_key != previous.dedup_key
+
+    # Logo em seguida (mesmo ciclo ou o próximo): não repete.
+    assert rain_alerts(evaluate_region_alerts(reg)) == []
