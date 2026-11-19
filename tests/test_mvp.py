@@ -307,22 +307,33 @@ def test_power_restoration_crowdsourcing_api(client):
         assert res_rep.status_code == 200
         assert res_rep.get_json()["status"] == "investigating"
 
-        # 2. Confirma restabelecimento ("A Luz Voltou")
+        # 2. Primeira confirmação ("A Luz Voltou"): é só um voto, o relato continua valendo
         res_rest = client.post("/api/power/restore", json={"region_id": reg.id, "comment": "A luz retornou estável"})
         assert res_rest.status_code == 200
         rest_data = res_rest.get_json()
         assert rest_data["success"] is True
-        assert rest_data["status"] == "restored"
-        assert "Energia Restabelecida" in rest_data["label"]
-        assert rest_data["reports_30m"] == 0
-        assert rest_data["restored_time"] is not None
+        assert rest_data["restoration_confirmed"] is False
+        assert rest_data["status"] == "investigating"
+        assert rest_data["reports_30m"] == 1
+        assert "outro morador" in rest_data["message"]
 
-        # 3. Tentativa de confirmação repetida de retorno do mesmo IP -> rate limited (429)
+        # 3. Confirmação repetida do mesmo IP -> rate limited (429)
         res_dup_rest = client.post("/api/power/restore", json={"region_id": reg.id})
         assert res_dup_rest.status_code == 429
         assert "cooldown_remaining" in res_dup_rest.get_json()
 
-        # 4. Se houver nova queda de energia posterior (de outro IP), o status deve voltar para investigando/outage
+        # 4. Segunda confirmação, de outro IP -> consenso: energia restabelecida
+        res_rest_2 = client.post("/api/power/restore", json={"region_id": reg.id},
+                                 environ_base={"REMOTE_ADDR": "10.0.0.40"})
+        assert res_rest_2.status_code == 200
+        rest_2 = res_rest_2.get_json()
+        assert rest_2["restoration_confirmed"] is True
+        assert rest_2["status"] == "restored"
+        assert "Energia Restabelecida" in rest_2["label"]
+        assert rest_2["reports_30m"] == 0
+        assert rest_2["restored_time"] is not None
+
+        # 5. Se houver nova queda de energia posterior (de outro IP), o status deve voltar para investigando/outage
         res_new_outage = client.post(
             "/api/power/report",
             json={"region_id": reg.id, "comment": "Caiu novamente agora"},
@@ -744,6 +755,71 @@ def test_power_ip_cap_blocks_user_agent_rotation(client):
                       environ_base={"REMOTE_ADDR": "10.0.0.7"})
     assert res.status_code == 200
     assert client.get(f"/api/power/status/{reg_id}").get_json()["status"] == "outage_reported"
+
+
+def test_single_restore_cannot_hide_outage(client):
+    """Um único 'A Luz Voltou' (mesmo trocando User-Agent) não esconde uma falta de luz relatada."""
+    from app.models import PowerOutageReport
+    with client.application.app_context():
+        reg_id = Region.query.first().id
+    for ip in ("10.1.0.1", "10.1.0.2", "10.1.0.3"):
+        client.post("/api/power/report", json={"region_id": reg_id}, environ_base={"REMOTE_ADDR": ip})
+    assert client.get(f"/api/power/status/{reg_id}").get_json()["status"] == "outage_reported"
+
+    codes = [
+        client.post("/api/power/restore", json={"region_id": reg_id},
+                    headers={"User-Agent": f"agente-{i}"},
+                    environ_base={"REMOTE_ADDR": "10.9.9.9"}).status_code
+        for i in range(3)
+    ]
+    assert codes == [200, 429, 429]
+    status = client.get(f"/api/power/status/{reg_id}").get_json()
+    assert status["status"] == "outage_reported"
+    assert status["restore_confirmations"] == 1
+    with client.application.app_context():
+        # A confirmação não mexe mais nos relatos gravados.
+        assert PowerOutageReport.query.filter_by(region_id=reg_id, is_active=True).count() == 3
+
+
+def test_late_single_restore_does_not_hide_new_reports(client):
+    """Depois do consenso, uma confirmação isolada não esconde relatos de uma nova queda."""
+    from datetime import timedelta
+    from app.models import PowerOutageReport, PowerRestorationReport
+    from app.services.power_service import get_power_status
+    with client.application.app_context():
+        reg_id = Region.query.first().id
+        now = datetime.now(timezone.utc)
+        for minutes_ago, h in ((30, "a"), (25, "b")):
+            db.session.add(PowerRestorationReport(region_id=reg_id, reporter_hash=h,
+                                                  restored_at=now - timedelta(minutes=minutes_ago)))
+        for minutes_ago, h in ((10, "x"), (9, "y"), (8, "z")):
+            db.session.add(PowerOutageReport(region_id=reg_id, reporter_hash=h, is_active=True,
+                                             reported_at=now - timedelta(minutes=minutes_ago)))
+        db.session.add(PowerRestorationReport(region_id=reg_id, reporter_hash="c",
+                                              restored_at=now - timedelta(minutes=1)))
+        db.session.commit()
+        status = get_power_status(reg_id)
+        assert status["restoration_confirmed"] is True
+        assert status["reports_30m"] == 3
+        assert status["status"] == "outage_reported"
+
+
+def test_power_posts_have_global_ip_limit(client):
+    """Mais de 30 POSTs em /api/power/* por IP em 10 min recebem 429; GETs e boletins não contam."""
+    from app.services import power_service
+    with client.application.app_context():
+        reg_id = Region.query.first().id
+    for _ in range(power_service.POWER_POST_LIMIT):
+        assert client.post(f"/api/power/probes/check/{reg_id}").status_code == 200
+    blocked = client.post(f"/api/power/probes/check/{reg_id}")
+    assert blocked.status_code == 429
+    assert "Muitas requisições" in blocked.get_json()["error"]
+    assert client.post("/api/power/report", json={"region_id": reg_id}).status_code == 429
+    assert client.get(f"/api/power/status/{reg_id}").status_code == 200
+    # Outro IP não é afetado; boletins (com token de admin) ficam fora do limite.
+    assert client.post(f"/api/power/probes/check/{reg_id}",
+                       environ_base={"REMOTE_ADDR": "10.2.0.1"}).status_code == 200
+    assert client.post("/api/power/bulletins", json={}).status_code == 403
 
 
 def test_ip_report_limiter_window_and_regions():

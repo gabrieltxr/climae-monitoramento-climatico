@@ -420,6 +420,27 @@ def api_climate_history(region_id: int):
 # MONITORAMENTO DE ENERGIA ELÉTRICA (CROWDSOURCING & SITUAÇÃO DA REDE)
 # =========================================================================
 
+@main_bp.before_request
+def limit_public_power_posts():
+    """
+    Limite geral por IP nos POSTs públicos de /api/power/* (relatos, confirmações e
+    checagem de sondas). A publicação de boletins fica de fora: exige token de admin.
+    """
+    if request.method != "POST" or not request.path.startswith("/api/power/"):
+        return None
+    if request.path == "/api/power/bulletins":
+        return None
+    from app.services.power_service import generate_ip_key, get_power_post_limiter
+    allowed, remaining = get_power_post_limiter().try_acquire(generate_ip_key(request), "power-post")
+    if allowed:
+        return None
+    return jsonify({
+        "success": False,
+        "error": f"Muitas requisições da sua rede. Aguarde mais {remaining} minuto(s).",
+        "cooldown_remaining": remaining,
+    }), 429
+
+
 @main_bp.route('/api/power/status/<int:region_id>')
 def api_power_status(region_id: int):
     """Retorna o status atual de abastecimento elétrico da região e cooldown do usuário."""
@@ -449,7 +470,7 @@ def api_power_report():
 @main_bp.route('/api/power/restore', methods=['POST'])
 def api_power_restore():
     """Registra uma confirmação colaborativa de retorno da luz ("A Luz Voltou") com proteção anti-spam."""
-    from app.services.power_service import generate_reporter_hash, record_power_restoration
+    from app.services.power_service import generate_ip_key, generate_reporter_hash, record_power_restoration
     data = request.get_json() or {}
     region_id = data.get('region_id')
     comment = data.get('comment')
@@ -458,7 +479,7 @@ def api_power_restore():
         return jsonify({"success": False, "error": "ID da região é obrigatório."}), 400
 
     reporter_hash = generate_reporter_hash(request)
-    result = record_power_restoration(region_id, reporter_hash, comment)
+    result = record_power_restoration(region_id, reporter_hash, comment, ip_key=generate_ip_key(request))
     status_code = 200 if result.get("success") else 429
     return jsonify(result), status_code
 
