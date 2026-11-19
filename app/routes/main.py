@@ -99,39 +99,60 @@ def api_region_weather(region_id):
         ]
     })
 
+def _latest_per_region(model, time_column, *conditions) -> dict:
+    """{region_id: linha mais recente} de todas as regiões em uma consulta."""
+    latest = (
+        db.session.query(model.region_id.label("rid"), db.func.max(time_column).label("t"))
+        .filter(*conditions)
+        .group_by(model.region_id)
+        .subquery()
+    )
+    rows = (
+        model.query
+        .join(latest, db.and_(model.region_id == latest.c.rid, time_column == latest.c.t))
+        .filter(*conditions)
+        .order_by(model.id.desc())
+        .all()
+    )
+    result = {}
+    for row in rows:
+        result.setdefault(row.region_id, row)  # empate no horário: fica a linha mais nova
+    return result
+
+
 @main_bp.route('/api/weather-summary', methods=['GET'])
 def get_weather_summary():
     """Resumo rápido de todas as regiões para renderizar a camada visual no Mapa Leaflet e leitura de alertas."""
-    # 1. Rota estritamente para leitura (sem criar nem comitar nada no banco de dados)
+    # Rota só de leitura. Busca tudo em 4 consultas (regiões, última estimativa, previsões
+    # e último risco de todas as regiões) em vez de 3 consultas por região (N+1).
     regions = Region.query.all()
-    summary = []
     now_utc_hour = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0)
+    latest_obs = _latest_per_region(WeatherObservation, WeatherObservation.observed_at,
+                                    WeatherObservation.is_forecast == False)
+    latest_risk = _latest_per_region(RiskAssessment, RiskAssessment.assessed_at)
+
+    forecasts_by_region = {}
+    upcoming = (
+        WeatherObservation.query
+        .filter(
+            WeatherObservation.is_forecast == True,
+            WeatherObservation.observed_at >= now_utc_hour.replace(tzinfo=None),
+        )
+        .order_by(WeatherObservation.region_id, WeatherObservation.observed_at.asc(), WeatherObservation.id.asc())
+        .all()
+    )
+    for f in upcoming:
+        bucket = forecasts_by_region.setdefault(f.region_id, [])
+        if len(bucket) < 24:
+            bucket.append(f)
+
+    summary = []
     for r in regions:
-        current_obs = (
-            WeatherObservation.query
-            .filter_by(region_id=r.id, is_forecast=False)
-            .order_by(WeatherObservation.observed_at.desc())
-            .first()
-        )
-        forecasts = (
-            WeatherObservation.query
-            .filter(
-                WeatherObservation.region_id == r.id,
-                WeatherObservation.is_forecast == True,
-                WeatherObservation.observed_at >= now_utc_hour.replace(tzinfo=None)
-            )
-            .order_by(WeatherObservation.observed_at.asc())
-            .limit(24)
-            .all()
-        )
+        current_obs = latest_obs.get(r.id)
+        forecasts = forecasts_by_region.get(r.id, [])
         rain_24h = sum((f.precipitation_mm or 0.0) for f in forecasts)
         fc = forecasts[0] if forecasts else None
-        risk = (
-            RiskAssessment.query
-            .filter_by(region_id=r.id)
-            .order_by(RiskAssessment.assessed_at.desc())
-            .first()
-        )
+        risk = latest_risk.get(r.id)
         summary.append({
             "region_id": r.id,
             "municipality": r.municipality,

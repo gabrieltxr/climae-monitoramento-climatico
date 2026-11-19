@@ -1371,3 +1371,70 @@ def test_alert_repeat_window_ignores_utc_day_turnover(client):
 
     # Logo em seguida (mesmo ciclo ou o próximo): não repete.
     assert rain_alerts(evaluate_region_alerts(reg)) == []
+
+
+# --- /api/weather-summary sem N+1 ---
+
+def test_weather_summary_batches_queries_and_picks_latest(client):
+    from datetime import timedelta
+    from sqlalchemy import event
+    from app.models import RiskAssessment
+    hour = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0).replace(tzinfo=None)
+    first = Region.query.first()
+    regions = [first]
+    for i in range(5):
+        r = Region(municipality="Pelotas", name=f"R{i}", latitude=-31.7, longitude=-52.3)
+        db.session.add(r)
+        regions.append(r)
+    db.session.commit()
+    empty = Region(municipality="Chuí", name="Sem dados", latitude=-33.7, longitude=-53.4)
+    db.session.add(empty)
+    db.session.commit()
+
+    for idx, r in enumerate(regions):
+        db.session.add_all([
+            WeatherObservation(region_id=r.id, observed_at=hour - timedelta(hours=2), is_forecast=False,
+                               temperature_c=10.0, source="m"),
+            WeatherObservation(region_id=r.id, observed_at=hour - timedelta(hours=1), is_forecast=False,
+                               temperature_c=20.0 + idx, wind_direction=90.0, source="m"),
+            # Previsão vencida não entra; 30 horas futuras, só as 24 primeiras contam.
+            WeatherObservation(region_id=r.id, observed_at=hour - timedelta(hours=1), is_forecast=True,
+                               precipitation_mm=99.0, source="m"),
+        ])
+        for h in range(30):
+            db.session.add(WeatherObservation(region_id=r.id, observed_at=hour + timedelta(hours=h),
+                                              is_forecast=True, precipitation_mm=1.0,
+                                              rain_probability=40.0 + h, source="m"))
+        db.session.add_all([
+            RiskAssessment(region_id=r.id, assessed_at=hour - timedelta(hours=3), risk_level="Alto",
+                           score=60, method_version="t"),
+            RiskAssessment(region_id=r.id, assessed_at=hour - timedelta(minutes=10), risk_level="Moderado",
+                           score=30 + idx, method_version="t"),
+        ])
+    db.session.commit()
+
+    engine = db.engine
+    count = {"n": 0}
+
+    def on_exec(*a, **k):
+        count["n"] += 1
+    event.listen(engine, "before_cursor_execute", on_exec)
+    try:
+        data = client.get("/api/weather-summary?format=list").get_json()
+    finally:
+        event.remove(engine, "before_cursor_execute", on_exec)
+
+    assert count["n"] <= 4
+    by_id = {row["region_id"]: row for row in data}
+    assert len(by_id) == 7
+    for idx, r in enumerate(regions):
+        row = by_id[r.id]
+        assert row["temperature_c"] == 20.0 + idx
+        assert row["wind_direction"] == 90.0
+        assert row["rain_next_24h_mm"] == 24.0
+        assert row["rain_probability"] == 40.0
+        assert row["risk_level"] == "Moderado" and row["risk_score"] == 30 + idx
+        assert row["observed_at"].endswith("+00:00")
+    blank = by_id[empty.id]
+    assert blank["temperature_c"] is None and blank["observed_at"] is None
+    assert blank["rain_next_24h_mm"] == 0 and blank["risk_level"] == "Baixo"
