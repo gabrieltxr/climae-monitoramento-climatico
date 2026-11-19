@@ -26,6 +26,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from app import create_app
 from app.scheduler import init_scheduler, scheduler
+from app.db_schema import ensure_schema
 
 
 def start(app) -> bool:
@@ -67,4 +68,7 @@ def main(app=None, stop_event=None) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    _app = create_app()
+    with _app.app_context():
+        ensure_schema()
+    sys.exit(main(_app))
