@@ -9,9 +9,7 @@ elétrico por localidade.
 import hashlib
 import hmac
 import math
-import socket
 import threading
-import time
 from collections import deque
 from datetime import datetime, timedelta, timezone
 from flask import Request, current_app
@@ -20,7 +18,6 @@ from app.models import (
     Region,
     PowerOutageReport,
     PowerRestorationReport,
-    PowerGridProbe,
     PowerUtilityBulletin,
 )
 
@@ -63,8 +60,8 @@ IP_REPORT_WINDOW_MINUTES = 30
 RESTORE_CONSENSUS = 2
 RESTORE_WINDOW_MINUTES = 45
 
-# Limite geral de POSTs em /api/power/* por IP (cobre também a checagem de sondas,
-# que abre conexões externas, e qualquer abuso que os cooldowns não peguem).
+# Limite geral de POSTs em /api/power/* por IP (cobre qualquer abuso que os
+# cooldowns e tetos por região não peguem).
 POWER_POST_LIMIT = 30
 POWER_POST_WINDOW_MINUTES = 10
 
@@ -292,150 +289,6 @@ def record_power_restoration(region_id: int, reporter_hash: str, comment: str = 
     return status_data
 
 
-def probe_host(host: str, port: int = 53, timeout: float = 1.0) -> tuple[bool, int | None]:
-    """
-    Testa a conectividade de um nó de rede via conexão TCP de baixa latência e não intrusiva.
-    Retorna (is_up: bool, latency_ms: int | None).
-    """
-    start = time.perf_counter()
-    sock = None
-    try:
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.settimeout(timeout)
-        sock.connect((host, port))
-        latency = int((time.perf_counter() - start) * 1000)
-        return True, max(1, latency)
-    except Exception:
-        return False, None
-    finally:
-        if sock:
-            try:
-                sock.close()
-            except Exception:
-                pass
-
-
-def evaluate_region_probes(region_id: int) -> dict:
-    """
-    Avalia o consenso multi-operadora das sondas da região:
-    - Se todas as operadoras caírem simultaneamente: "blackout_suspected" (queda geral de infraestrutura).
-    - Se apenas uma operadora falhar e outras continuarem ativas: "telecom_instability" (falso positivo filtrado!).
-    - Se todas responderem normalmente: "healthy".
-    - Se não houver sondas cadastradas: "unconfigured".
-    """
-    probes = PowerGridProbe.query.filter_by(region_id=region_id).all()
-    if not probes:
-        return {
-            "status": "unconfigured",
-            "total_probes": 0,
-            "up_probes": 0,
-            "providers_down": [],
-            "providers_up": [],
-            "probes": [],
-        }
-
-    total_probes = len(probes)
-    up_probes = sum(1 for p in probes if p.is_up)
-
-    # Agrupamento por operadora para detecção de falha seletiva de telecomunicações
-    providers: dict[str, list[bool]] = {}
-    for p in probes:
-        providers.setdefault(p.provider_name, []).append(p.is_up)
-
-    providers_down = []
-    providers_up = []
-    for prov_name, statuses in providers.items():
-        if any(statuses):
-            providers_up.append(prov_name)
-        else:
-            providers_down.append(prov_name)
-
-    if not providers_up and providers_down:
-        telemetry_status = "blackout_suspected"
-    elif providers_down and providers_up:
-        telemetry_status = "telecom_instability"
-    else:
-        telemetry_status = "healthy"
-
-    return {
-        "status": telemetry_status,
-        "total_probes": total_probes,
-        "up_probes": up_probes,
-        "providers_down": providers_down,
-        "providers_up": providers_up,
-        "probes": [p.to_dict() for p in probes],
-    }
-
-
-def seed_default_probes_if_empty():
-    """
-    Popula sondas de conectividade padrão para as regiões caso a tabela esteja vazia.
-    Configura nós de alta confiabilidade em 3 provedores distintos (Claro, Vivo, RNP/Regional).
-    """
-    if PowerGridProbe.query.first():
-        return
-
-    regions = Region.query.all()
-    if not regions:
-        return
-
-    default_probe_templates = [
-        {"provider": "Claro", "suffix": "Gateway Claro", "host": "1.1.1.1", "port": 53},
-        {"provider": "Vivo", "suffix": "Gateway Vivo", "host": "8.8.8.8", "port": 53},
-        {"provider": "RNP / Regional", "suffix": "Backbone Acadêmico / Regional", "host": "9.9.9.9", "port": 53},
-    ]
-
-    probes_to_add = []
-    now_utc = datetime.now(timezone.utc)
-    for reg in regions:
-        for tpl in default_probe_templates:
-            probe = PowerGridProbe(
-                region_id=reg.id,
-                name=f"{reg.name} ({tpl['suffix']})",
-                target_host=tpl["host"],
-                target_port=tpl["port"],
-                provider_name=tpl["provider"],
-                is_up=True,
-                latency_ms=15,
-                last_checked_at=now_utc,
-            )
-            probes_to_add.append(probe)
-
-    db.session.bulk_save_objects(probes_to_add)
-    db.session.commit()
-
-
-def run_probe_checks_for_region(region_id: int, min_interval_seconds: int = 120, force: bool = False) -> dict:
-    """
-    Executa a checagem das sondas associadas à região especificada, aplicando
-    janela de proteção (TTL/Debounce de 120s) para evitar sobrecarga (overload)
-    de conexões na rede e bloqueio por firewall/rate-limit dos nós externos.
-    """
-    probes = PowerGridProbe.query.filter_by(region_id=region_id).all()
-    if not probes:
-        return evaluate_region_probes(region_id)
-
-    now_utc = datetime.now(timezone.utc)
-
-    # Se as sondas foram verificadas recentemente (dentro da janela de 2 min),
-    # reutiliza o estado recente sem disparar novos sockets na internet
-    if not force:
-        recently_checked = all(
-            p.last_checked_at and (now_utc - make_aware_utc(p.last_checked_at)).total_seconds() < min_interval_seconds
-            for p in probes
-        )
-        if recently_checked:
-            return evaluate_region_probes(region_id)
-
-    for p in probes:
-        is_up, latency = probe_host(p.target_host, p.target_port, timeout=1.0)
-        p.is_up = is_up
-        p.latency_ms = latency
-        p.last_checked_at = now_utc
-    db.session.commit()
-    return evaluate_region_probes(region_id)
-
-
 def record_utility_bulletin(data: dict) -> dict:
     """
     Registra um boletim ou comunicado oficial da concessionária ou Defesa Civil.
@@ -533,8 +386,11 @@ def seed_sample_bulletins_if_empty():
 def get_power_status(region_id: int, reporter_hash: str = None) -> dict:
     """
     Calcula o status atual do abastecimento elétrico da região com base na janela de relatos
-    das últimas horas, confirmações de restabelecimento, telemetria de sondas de rede
-    e eventuais comunicados oficiais.
+    das últimas horas, confirmações de restabelecimento e eventuais comunicados oficiais.
+
+    Não usa mais as "sondas de conectividade": elas testavam DNS públicos a partir do
+    servidor (iguais para todas as regiões), ou seja, mediam a internet do servidor e não
+    a energia do bairro.
     """
     region = db.session.get(Region, region_id)
     if not region:
@@ -544,10 +400,6 @@ def get_power_status(region_id: int, reporter_hash: str = None) -> dict:
     cutoff_30m = now_utc - timedelta(minutes=30)
     cutoff_60m = now_utc - timedelta(minutes=60)
     cutoff_restoration = now_utc - timedelta(minutes=RESTORE_WINDOW_MINUTES)
-
-    # Avaliação de telemetria multi-operadora de rede
-    telemetry = evaluate_region_probes(region.id)
-    telemetry_status = telemetry.get("status")
 
     # Consenso do "A Luz Voltou": com RESTORE_CONSENSUS confirmações recentes, o retorno vale
     # a partir da RESTORE_CONSENSUS-ésima mais recente. Usar a mais recente deixaria uma
@@ -618,49 +470,35 @@ def get_power_status(region_id: int, reporter_hash: str = None) -> dict:
         br_time = rest_aware - timedelta(hours=3)
         restored_time_str = br_time.strftime("%H:%M")
 
-    # Lógica de Matriz de Confiança e Consenso Triplo:
+    # Matriz de confiança (só fontes reais: concessionária e moradores):
     # 1. Oficial: boletim crítico recente citando o município
     if official_bulletin and (official_bulletin.affected_customers or 0) > 500:
         status_key = "official_outage"
         status_label = "Interrupção de Energia Confirmada pela Concessionária"
         severity = "danger"
 
-    # 2. Confirmação Popular ou Correlação Forte (Sondas Offline + Moradores)
+    # 2. Confirmação popular: 3+ relatos recentes
     elif reports_30m >= 3:
         status_key = "outage_reported"
         status_label = f"Falta de Luz Reportada por Moradores ({reports_30m} relatos recentes)"
         severity = "danger"
-    elif reports_30m >= 1 and telemetry_status == "blackout_suspected":
-        status_key = "outage_reported"
-        status_label = f"Falta de Luz Confirmada (Sondas Offline + {reports_30m} relato de morador)"
-        severity = "danger"
 
-    # 3. Suspeita Técnica (Sondas de todas as operadoras caíram, aguardando relato de moradores)
-    elif telemetry_status == "blackout_suspected" and reports_30m == 0:
-        status_key = "blackout_suspected"
-        status_label = "Suspeita Técnica de Queda (Todas as operadoras de internet sem sinal)"
-        severity = "warning"
-
-    # 4. Investigando / Suspeita: 1 ou 2 relatos ativos isolados
+    # 3. Investigando / Suspeita: 1 ou 2 relatos ativos isolados
     elif reports_30m >= 1 or reports_60m >= 2:
         status_key = "investigating"
         status_label = f"Relato Isolado de Falta de Energia ({reports_60m} na última hora)"
         severity = "warning"
 
-    # 5. Restabelecida: Moradores confirmaram retorno da luz recentemente (e sem novas quedas)
+    # 4. Restabelecida: moradores confirmaram retorno da luz recentemente (e sem novas quedas)
     elif latest_restoration:
         status_key = "restored"
         status_label = f"Energia Restabelecida (confirmado por moradores às {restored_time_str})"
         severity = "success"
 
-    # 6. Estável / Normal (com ou sem alerta de instabilidade de telecomunicações)
+    # 5. Estável
     else:
         status_key = "stable"
-        if telemetry_status == "telecom_instability":
-            down_provs = ", ".join(telemetry.get("providers_down", []))
-            status_label = f"Rede Elétrica Normal (Instabilidade de dados na operadora {down_provs})"
-        else:
-            status_label = "Rede Elétrica Estável (Sem relatos de interrupção)"
+        status_label = "Rede Elétrica Estável (Sem relatos de interrupção)"
         severity = "success"
 
     return {
@@ -680,7 +518,6 @@ def get_power_status(region_id: int, reporter_hash: str = None) -> dict:
         "restored_time": restored_time_str,
         "restoration_confirmed": latest_restoration is not None,
         "restore_confirmations": len(recent_restorations),
-        "telemetry": telemetry,
         "official_bulletin": {
             "id": official_bulletin.id,
             "headline": official_bulletin.headline,

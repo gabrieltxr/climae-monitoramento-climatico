@@ -423,8 +423,8 @@ def api_climate_history(region_id: int):
 @main_bp.before_request
 def limit_public_power_posts():
     """
-    Limite geral por IP nos POSTs públicos de /api/power/* (relatos, confirmações e
-    checagem de sondas). A publicação de boletins fica de fora: exige token de admin.
+    Limite geral por IP nos POSTs públicos de /api/power/* (relatos e confirmações).
+    A publicação de boletins fica de fora: exige token de admin.
     """
     if request.method != "POST" or not request.path.startswith("/api/power/"):
         return None
@@ -517,24 +517,6 @@ def api_power_restore():
     result = record_power_restoration(region_id, reporter_hash, comment, ip_key=generate_ip_key(request))
     status_code = 200 if result.get("success") else 429
     return jsonify(result), status_code
-
-
-@main_bp.route('/api/power/probes/<int:region_id>', methods=['GET'])
-def api_power_probes(region_id: int):
-    """Retorna a situação de telemetria das sondas virtuais de conectividade para a região."""
-    from app.services.power_service import evaluate_region_probes
-    telemetry = evaluate_region_probes(region_id)
-    return jsonify(telemetry)
-
-
-@main_bp.route('/api/power/probes/check/<int:region_id>', methods=['POST'])
-def api_power_check_probes(region_id: int):
-    """Executa checagem ativa em tempo real das sondas de conectividade da região."""
-    from app.services.power_service import run_probe_checks_for_region, get_power_status, generate_reporter_hash
-    run_probe_checks_for_region(region_id)
-    reporter_hash = generate_reporter_hash(request)
-    status = get_power_status(region_id, reporter_hash)
-    return jsonify(status)
 
 
 @main_bp.route('/api/power/bulletins', methods=['GET'])

@@ -343,67 +343,32 @@ def test_power_restoration_crowdsourcing_api(client):
         assert res_new_outage.get_json()["status"] == "investigating"
 
 
-def test_power_telemetry_probes_and_consensus(client):
-    """Valida a telemetria por sondas virtuais e o algoritmo de consenso multi-operadora da Fase 2."""
+def test_power_status_ignores_legacy_probes(client):
+    """Sondas antigas (DNS públicos testados do servidor) não influenciam mais o status."""
     from app.models import PowerGridProbe
-    from app.services.power_service import seed_default_probes_if_empty, evaluate_region_probes, get_power_status
+    from app.services.power_service import get_power_status
 
     with client.application.app_context():
         reg = Region.query.first()
-        assert reg is not None
-
-        # 1. Popula sondas padrão multi-operadora para a região de teste
-        seed_default_probes_if_empty()
-        probes = PowerGridProbe.query.filter_by(region_id=reg.id).all()
-        assert len(probes) >= 3
-
-        # 2. Avaliação inicial -> todas saudáveis (healthy)
-        eval_healthy = evaluate_region_probes(reg.id)
-        assert eval_healthy["status"] == "healthy"
-        assert eval_healthy["up_probes"] == len(probes)
-
-        # 3. Simula falha isolada de 1 operadora (ex: Claro cai, Vivo e RNP continuam up)
-        # Filtro Anti-Falso Positivo: NÃO deve acusar blackout elétrico
-        for p in probes:
-            if p.provider_name == "Claro":
-                p.is_up = False
+        # Linhas que ficaram no banco de instalações antigas, todas "offline".
+        for provider, host in (("Claro", "1.1.1.1"), ("Vivo", "8.8.8.8"), ("RNP / Regional", "9.9.9.9")):
+            db.session.add(PowerGridProbe(region_id=reg.id, name=provider, target_host=host,
+                                          target_port=53, provider_name=provider, is_up=False))
         db.session.commit()
 
-        eval_telecom = evaluate_region_probes(reg.id)
-        assert eval_telecom["status"] == "telecom_instability"
-        assert "Claro" in eval_telecom["providers_down"]
+        status = get_power_status(reg.id)
+        assert status["status"] == "stable"
+        assert "telemetry" not in status
 
-        status_telecom = get_power_status(reg.id)
-        assert status_telecom["status"] == "stable"
-        assert "Instabilidade de dados" in status_telecom["label"]
+        # 1 relato isolado continua sendo só "investigando" (antes, com sondas offline, virava "confirmada").
+        res = client.post("/api/power/report", json={"region_id": reg.id},
+                          environ_base={"REMOTE_ADDR": "172.16.0.99"})
+        assert res.status_code == 200
+        assert res.get_json()["status"] == "investigating"
 
-        # 4. Simula queda simultânea de TODAS as operadoras (Blackout Suspected)
-        for p in probes:
-            p.is_up = False
-        db.session.commit()
-
-        eval_blackout = evaluate_region_probes(reg.id)
-        assert eval_blackout["status"] == "blackout_suspected"
-
-        status_blackout = get_power_status(reg.id)
-        assert status_blackout["status"] == "blackout_suspected"
-        assert "Suspeita Técnica" in status_blackout["label"]
-
-        # 5. Correlaciona: Suspeita Técnica + 1 relato de morador -> eleva imediatamente para 'outage_reported'
-        res_corr = client.post(
-            "/api/power/report",
-            json={"region_id": reg.id, "comment": "Confirmando que caiu a energia no bairro"},
-            environ_base={"REMOTE_ADDR": "172.16.0.99"}
-        )
-        assert res_corr.status_code == 200
-        corr_data = res_corr.get_json()
-        assert corr_data["status"] == "outage_reported"
-        assert "Sondas Offline" in corr_data["label"]
-
-        # 6. Validação das rotas de API da Fase 2
-        res_probes_api = client.get(f"/api/power/probes/{reg.id}")
-        assert res_probes_api.status_code == 200
-        assert "total_probes" in res_probes_api.get_json()
+    # As rotas das sondas não existem mais.
+    assert client.get(f"/api/power/probes/{reg.id}").status_code == 404
+    assert client.post(f"/api/power/probes/check/{reg.id}").status_code in (404, 405)
 
 
 def test_power_official_bulletins_api(client, monkeypatch):
@@ -809,15 +774,16 @@ def test_power_posts_have_global_ip_limit(client):
     from app.services import power_service
     with client.application.app_context():
         reg_id = Region.query.first().id
+    # Requisições inválidas (400) também contam no limite geral.
     for _ in range(power_service.POWER_POST_LIMIT):
-        assert client.post(f"/api/power/probes/check/{reg_id}").status_code == 200
-    blocked = client.post(f"/api/power/probes/check/{reg_id}")
+        assert client.post("/api/power/report", json={}).status_code == 400
+    blocked = client.post("/api/power/report", json={"region_id": reg_id})
     assert blocked.status_code == 429
     assert "Muitas requisições" in blocked.get_json()["error"]
-    assert client.post("/api/power/report", json={"region_id": reg_id}).status_code == 429
+    assert client.post("/api/power/restore", json={"region_id": reg_id}).status_code == 429
     assert client.get(f"/api/power/status/{reg_id}").status_code == 200
     # Outro IP não é afetado; boletins (com token de admin) ficam fora do limite.
-    assert client.post(f"/api/power/probes/check/{reg_id}",
+    assert client.post("/api/power/report", json={"region_id": reg_id},
                        environ_base={"REMOTE_ADDR": "10.2.0.1"}).status_code == 200
     assert client.post("/api/power/bulletins", json={}).status_code == 403
 
@@ -885,12 +851,10 @@ def test_occurrences_invalid_dates_return_400(client):
 def _stub_scheduler_startup_io(monkeypatch):
     """Evita rede nas rotinas que o agendador executa ao iniciar."""
     import app.scheduler as sched_mod
-    import app.services.power_service as power_mod
     monkeypatch.delenv("DISABLE_SCHEDULER", raising=False)
     monkeypatch.delenv("WERKZEUG_RUN_MAIN", raising=False)
     monkeypatch.setattr(sched_mod, "run_scheduled_cycle", lambda app: None)
     monkeypatch.setattr(sched_mod, "consolidate_closed_month", lambda *a, **k: None)
-    monkeypatch.setattr(power_mod, "seed_default_probes_if_empty", lambda: None)
 
 
 def test_run_scheduler_script_starts_even_with_debug_env(monkeypatch):

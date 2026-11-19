@@ -210,6 +210,9 @@ class PowerRestorationReport(db.Model):
 class PowerGridProbe(db.Model):
     """
     Sondas de conectividade virtual de rede (Nós multi-operadora / gateways públicos).
+    SEM USO: as sondas testavam DNS públicos a partir do servidor (iguais para todas as
+    regiões) e não mediam a energia do bairro. A classe fica só para manter a tabela
+    existente até haver migrações (pasta migrations/).
     Permite avaliar a disponibilidade da infraestrutura elétrica através do monitoramento de nós de rede,
     distinguindo quedas gerais de energia de simples rompimentos de fibra ótica de uma única operadora.
     """
