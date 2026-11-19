@@ -520,6 +520,37 @@ def test_collector_saves_circular_wind_direction(client):
         assert all(f.wind_direction == 0.0 for f in fcs)
 
 
+def test_collector_current_rain_blends_models_and_labels_estimates(client):
+    """Chuva 'atual' usa a mistura entre modelos (não o maior valor) e os rótulos dizem que é modelo."""
+    from datetime import timedelta
+    from app.collectors.open_meteo import save_region_weather
+    hour = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0)
+    past = (hour - timedelta(hours=2)).strftime("%Y-%m-%dT%H:00")
+    future = (hour + timedelta(hours=2)).strftime("%Y-%m-%dT%H:00")
+    hourly = {"time": [past, future], "precipitation_best_match": [0.0, 0.0]}
+    # Só um modelo vê 10 mm agora: antes gravava 10 (máximo); a mistura dá 10 × 0,8 = 8.
+    current = {
+        "time": hour.strftime("%Y-%m-%dT%H:00"),
+        "precipitation_best_match": 10.0,
+        "precipitation_ecmwf_ifs025": 0.0,
+        "precipitation_gfs_seamless": 0.0,
+        "rain_best_match": 10.0,
+        "showers_gfs_seamless": 12.0,
+    }
+    with client.application.app_context():
+        reg = Region.query.first()
+        save_region_weather(reg, {"current": current, "hourly": hourly})
+        now_obs = WeatherObservation.query.filter_by(region_id=reg.id, is_forecast=False, observed_at=hour).one()
+        assert now_obs.precipitation_mm == 8.0
+        assert now_obs.source.startswith("Estimativa atual do modelo")
+        past_obs = WeatherObservation.query.filter(
+            WeatherObservation.region_id == reg.id, WeatherObservation.is_forecast.is_(False),
+            WeatherObservation.observed_at < hour).one()
+        assert past_obs.source.startswith("Estimativa do modelo para horas passadas")
+        fc = WeatherObservation.query.filter_by(region_id=reg.id, is_forecast=True).one()
+        assert fc.source.startswith("Previsão multi-modelo")
+
+
 def _fake_era5(missing_last_days: int = 0, incomplete_months: tuple = ("2026-10",)):
     """Série diária simulada do mês pedido; nos meses de `incomplete_months`, os últimos
     `missing_last_days` dias vêm null (ERA5 atrasado)."""

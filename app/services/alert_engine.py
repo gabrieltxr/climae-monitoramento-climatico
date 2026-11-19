@@ -72,7 +72,8 @@ def evaluate_region_alerts(region: Region) -> list[Alert]:
         .all()
     )
 
-    # 2. Observações reais das últimas 12h (inclui horas recuperadas pós-desligamento)
+    # 2. Estimativas do modelo para as últimas 12h (não são medições de estação; inclui
+    #    horas recuperadas pós-desligamento)
     recent_observed = (
         WeatherObservation.query
         .filter(
@@ -97,14 +98,14 @@ def evaluate_region_alerts(region: Region) -> list[Alert]:
     triggered_rules = []
 
     if effective_rain >= RAIN_ALERT_MM:
-        origem_chuva = "prevista (24h)" if rain_forecast_24h >= rain_past_12h else "observada (últimas 12h)"
+        origem_chuva = "prevista (24h)" if rain_forecast_24h >= rain_past_12h else "estimada pelo modelo (últimas 12h)"
         triggered_rules.append((
             "CHUVA_INTENSA_24H",
             f"Chuva acumulada {origem_chuva} de {effective_rain:.1f} mm (Limiar: {RAIN_ALERT_MM} mm)"
         ))
 
     if peak_wind >= WIND_ALERT_KMH:
-        origem_vento = "previsto" if peak_wind_forecast >= peak_wind_observed else "observado nas últimas 12h"
+        origem_vento = "previsto" if peak_wind_forecast >= peak_wind_observed else "estimado pelo modelo nas últimas 12h"
         triggered_rules.append((
             "VENDAVAL_PREVISTO",
             f"Vento {origem_vento} de {peak_wind:.1f} km/h (Limiar: {WIND_ALERT_KMH} km/h)"

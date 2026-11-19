@@ -5,13 +5,17 @@
 [![Database](https://img.shields.io/badge/database-SQLite%20%2F%20SQLAlchemy-green.svg)](https://www.sqlite.org/)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-Aplicação web modular em Python (Flask) desenvolvida para monitoramento meteorológico de alta precisão em tempo real, avaliação contínua de risco geoespacial, telemetria rodoviária e análise climatológica histórica para **56 regiões e bairros distribuídos em 8 municípios da Zona Sul do Rio Grande do Sul**.
+Aplicação web modular em Python (Flask) desenvolvida para monitoramento meteorológico baseado em modelos numéricos, avaliação contínua de risco geoespacial, telemetria rodoviária e análise climatológica histórica para **56 regiões e bairros distribuídos em 8 municípios da Zona Sul do Rio Grande do Sul**.
+
+> **Sobre os dados meteorológicos:** o CLIMAE ainda não usa medições de estações. As
+> condições "atuais" e das últimas 12 horas são **estimativas dos modelos** (ECMWF, GFS e
+> ICON, via API de previsão do Open-Meteo), não leituras de pluviômetro ou anemômetro.
 
 ---
 
 ## 1. Módulos do Sistema (7 Painéis Integrados)
 
-### 01. Dashboard Meteorológico em Tempo Real
+### 01. Dashboard Meteorológico (Modelos Numéricos)
 * **Consenso Multi-Modelo:** Coleta sincronizada dos modelos **Best Match**, **ECMWF IFS 0.25°** e **GFS Seamless** via Open-Meteo API.
 * **Métricas Principais:** Temperatura, sensação térmica, umidade relativa, pressão, ponto de orvalho, velocidade e direção do vento (10m), precipitação acumulada e probabilidade de chuva.
 * **Tendência Horária:** Gráficos interativos para projeção das próximas 24 horas.

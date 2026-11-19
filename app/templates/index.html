@@ -1188,7 +1188,7 @@
                 <img src="{{ url_for('static', filename='img/climae_logo.png') }}" alt="CLIMAE Logo" class="header-logo" />
                 <div>
                     <h1>CLIMAE • Zona Sul do RS</h1>
-                    <p>Monitoramento Meteorológico em Tempo Real & Análise de Risco Regional (MVP Completo)</p>
+                    <p>Monitoramento Meteorológico por Modelos (ECMWF, GFS e ICON) & Análise de Risco Regional (MVP)</p>
                 </div>
             </div>
         </div>
@@ -2612,7 +2612,7 @@
                 document.getElementById('valPrecip').innerHTML = `${cur.precipitation_mm ?? '--'}<span class="metric-unit">mm</span>`;
                 document.getElementById('valProb').innerHTML = `${cur.rain_probability ?? '--'}<span class="metric-unit">%</span>`;
                 document.getElementById('weatherMeta').innerText =
-                    `Fonte: ${cur.source} • Última leitura: ${formatBRT(cur.observed_at)} (Horário de Brasília • Ciclo: 15 min)`;
+                    `Fonte: ${cur.source} • Atualizado: ${formatBRT(cur.observed_at)} (Horário de Brasília • Ciclo: 15 min)`;
             }
 
             if (data.region && map) {
