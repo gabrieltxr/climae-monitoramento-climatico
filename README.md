@@ -132,6 +132,11 @@ Acesse a aplicação no navegador em: **`http://127.0.0.1:5000`**
 > Com `CLIMAE_HOST` fora de 127.0.0.1, o `run.py` recusa subir com chave vazia ou
 > pública. Via WSGI essa verificação não roda: defina a chave antes de publicar.
 
+> **Mapa de fundo (CARTO):** os tiles exigem uma chave da CARTO Basemaps em
+> `CARTO_BASEMAPS_KEY` no `.env`; sem ela o mapa aparece com o aviso "API KEY REQUIRED".
+> A chave é enviada ao navegador de todo visitante, então restrinja-a aos domínios do
+> CLIMAE no painel da CARTO.
+
 > **Estações do INMET (opcional):** peça um token por e-mail a `cadastro.act@inmet.gov.br`
 > e coloque-o em `INMET_TOKEN` no `.env`. A cada ciclo o agendador lê ontem e hoje das 10
 > estações automáticas da região (Rio Grande, Capão do Leão/Pelotas, Jaguarão, Canguçu,

@@ -1,7 +1,7 @@
 import hmac
 import os
 from datetime import datetime, timezone, timedelta
-from flask import Blueprint, render_template, jsonify, request
+from flask import Blueprint, current_app, render_template, jsonify, request
 from app.models import db, Region, WeatherObservation, Occurrence, RiskAssessment, Alert, TrafficEvent, MonthlyClimateSummary
 from app.services.risk_engine import calculate_region_risk
 from app.collectors.traffic_collector import get_traffic_panel_data, update_highway_conditions
@@ -15,7 +15,12 @@ MAX_PER_PAGE = 50
 def index():
     regions = Region.query.order_by(Region.municipality, Region.name).all()
     preferred_id = request.cookies.get('climae_preferred_region_id')
-    return render_template('index.html', regions=regions, preferred_id=preferred_id)
+    return render_template(
+        'index.html',
+        regions=regions,
+        preferred_id=preferred_id,
+        carto_basemaps_key=current_app.config.get('CARTO_BASEMAPS_KEY', ''),
+    )
 
 @main_bp.route('/api/regions')
 def api_regions():

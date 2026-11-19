@@ -1928,8 +1928,11 @@
             // Adiciona o controle de zoom em uma posição discreta (canto inferior direito)
             L.control.zoom({ position: 'bottomright' }).addTo(map);
 
-            // Camada CartoDB Dark Matter com a sua chave de API integrada
-            L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/dark_all/{z}/{x}/{y}.png?key=cb1_4tty_1_7ecceb9d4a702854e1ce9e46', {
+            // Camada CartoDB Dark Matter. A chave vem do .env (CARTO_BASEMAPS_KEY);
+            // sem ela a CARTO devolve tiles "API KEY REQUIRED".
+            const cartoKey = {{ carto_basemaps_key | tojson }};
+            const cartoKeyParam = cartoKey ? `?key=${encodeURIComponent(cartoKey)}` : '';
+            L.tileLayer(`https://{s}.basemaps.cartocdn.com/rastertiles/dark_all/{z}/{x}/{y}.png${cartoKeyParam}`, {
                 maxZoom: 19,
                 subdomains: 'abcd',
                 attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
