@@ -1371,3 +1371,163 @@ def test_alert_repeat_window_ignores_utc_day_turnover(client):
 
     # Logo em seguida (mesmo ciclo ou o próximo): não repete.
     assert rain_alerts(evaluate_region_alerts(reg)) == []
+
+
+# --- /api/weather-summary sem N+1 ---
+
+def test_weather_summary_batches_queries_and_picks_latest(client):
+    from datetime import timedelta
+    from sqlalchemy import event
+    from app.models import RiskAssessment
+    hour = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0).replace(tzinfo=None)
+    first = Region.query.first()
+    regions = [first]
+    for i in range(5):
+        r = Region(municipality="Pelotas", name=f"R{i}", latitude=-31.7, longitude=-52.3)
+        db.session.add(r)
+        regions.append(r)
+    db.session.commit()
+    empty = Region(municipality="Chuí", name="Sem dados", latitude=-33.7, longitude=-53.4)
+    db.session.add(empty)
+    db.session.commit()
+
+    for idx, r in enumerate(regions):
+        db.session.add_all([
+            WeatherObservation(region_id=r.id, observed_at=hour - timedelta(hours=2), is_forecast=False,
+                               temperature_c=10.0, source="m"),
+            WeatherObservation(region_id=r.id, observed_at=hour - timedelta(hours=1), is_forecast=False,
+                               temperature_c=20.0 + idx, wind_direction=90.0, source="m"),
+            # Previsão vencida não entra; 30 horas futuras, só as 24 primeiras contam.
+            WeatherObservation(region_id=r.id, observed_at=hour - timedelta(hours=1), is_forecast=True,
+                               precipitation_mm=99.0, source="m"),
+        ])
+        for h in range(30):
+            db.session.add(WeatherObservation(region_id=r.id, observed_at=hour + timedelta(hours=h),
+                                              is_forecast=True, precipitation_mm=1.0,
+                                              rain_probability=40.0 + h, source="m"))
+        db.session.add_all([
+            RiskAssessment(region_id=r.id, assessed_at=hour - timedelta(hours=3), risk_level="Alto",
+                           score=60, method_version="t"),
+            RiskAssessment(region_id=r.id, assessed_at=hour - timedelta(minutes=10), risk_level="Moderado",
+                           score=30 + idx, method_version="t"),
+        ])
+    db.session.commit()
+
+    engine = db.engine
+    count = {"n": 0}
+
+    def on_exec(*a, **k):
+        count["n"] += 1
+    event.listen(engine, "before_cursor_execute", on_exec)
+    try:
+        data = client.get("/api/weather-summary?format=list").get_json()
+    finally:
+        event.remove(engine, "before_cursor_execute", on_exec)
+
+    assert count["n"] <= 4
+    by_id = {row["region_id"]: row for row in data}
+    assert len(by_id) == 7
+    for idx, r in enumerate(regions):
+        row = by_id[r.id]
+        assert row["temperature_c"] == 20.0 + idx
+        assert row["wind_direction"] == 90.0
+        assert row["rain_next_24h_mm"] == 24.0
+        assert row["rain_probability"] == 40.0
+        assert row["risk_level"] == "Moderado" and row["risk_score"] == 30 + idx
+        assert row["observed_at"].endswith("+00:00")
+    blank = by_id[empty.id]
+    assert blank["temperature_c"] is None and blank["observed_at"] is None
+    assert blank["rain_next_24h_mm"] == 0 and blank["risk_level"] == "Baixo"
+
+
+# --- GET /api/risk não grava e não devolve avaliação velha ---
+
+def test_risk_get_never_writes_and_recomputes_stale(client):
+    from datetime import timedelta
+    from app.models import RiskAssessment
+    reg = Region.query.first()
+    now = datetime.now(timezone.utc)
+    db.session.add(WeatherObservation(region_id=reg.id, observed_at=now + timedelta(hours=1),
+                                      is_forecast=True, precipitation_mm=1.0, source="m"))
+    db.session.commit()
+
+    # Sem avaliação: calcula na hora, sem gravar.
+    data = client.get(f"/api/risk/{reg.id}").get_json()
+    assert data["calculado_agora"] is True
+    assert data["score"] is not None
+    assert RiskAssessment.query.count() == 0
+
+    # Avaliação recente do agendador: devolvida como está.
+    db.session.add(RiskAssessment(region_id=reg.id, assessed_at=(now - timedelta(minutes=10)).replace(tzinfo=None),
+                                  risk_level="Alto", score=61, method_version="agendador"))
+    db.session.commit()
+    data = client.get(f"/api/risk/{reg.id}").get_json()
+    assert data["calculado_agora"] is False
+    assert data["score"] == 61 and data["method_version"] == "agendador"
+
+    # Avaliação velha (agendador parado): recalcula sem gravar.
+    RiskAssessment.query.update({"assessed_at": (now - timedelta(days=21)).replace(tzinfo=None)})
+    db.session.commit()
+    data = client.get(f"/api/risk/{reg.id}").get_json()
+    assert data["calculado_agora"] is True
+    assert data["method_version"] != "agendador"
+    assert RiskAssessment.query.count() == 1
+
+
+def test_risk_engine_persist_flag(client):
+    from app.models import RiskAssessment
+    from app.services.risk_engine import calculate_region_risk
+    reg = Region.query.first()
+    calculate_region_risk(reg, persist=False)  # sem dados: Inconclusivo
+    assert RiskAssessment.query.count() == 0
+    calculate_region_risk(reg)
+    assert RiskAssessment.query.count() == 1
+
+
+# --- Catálogo único de regiões ---
+
+def test_region_catalog_is_56_unique_regions():
+    from collections import Counter
+    from app.regions_catalog import REGIONS
+    assert len(REGIONS) == 56
+    assert len({r["name"] for r in REGIONS}) == 56
+    assert set(Counter(r["city"] for r in REGIONS).values()) == {7}
+
+
+def test_scripts_use_the_shared_catalog():
+    from pathlib import Path
+    from app.regions_catalog import REGIONS
+    import scripts.seed_regions as seed_regions
+    assert seed_regions.ALL_REGIONS is REGIONS
+    # cleanup_all_regions roda ao ser importado: confere pelo texto.
+    cleanup = Path("scripts/cleanup_all_regions.py").read_text(encoding="utf-8")
+    assert "CANONICAL_REGIONS = REGIONS" in cleanup and "ALIASES = LEGACY_REGION_NAMES" in cleanup
+    assert '{"name":' not in cleanup  # nenhuma região escrita à mão no script
+
+
+def test_legacy_names_point_to_catalog_regions():
+    from app.regions_catalog import LEGACY_REGION_NAMES, REGION_NAMES
+    for (city, _old), new in LEGACY_REGION_NAMES.items():
+        assert (city, new) in REGION_NAMES
+
+
+def test_historical_occurrences_resolve_to_catalog_regions():
+    from scripts.seed_occurrences import HISTORICAL_EVENTS
+    from app.regions_catalog import resolve_region_name
+    unresolved = [(e["municipality"], e["region_name"]) for e in HISTORICAL_EVENTS
+                  if resolve_region_name(e["municipality"], e["region_name"]) is None]
+    assert unresolved == []
+
+
+def test_readme_region_list_matches_catalog():
+    import re
+    from pathlib import Path
+    from app.regions_catalog import REGIONS
+    expected = {}
+    for r in REGIONS:
+        m = re.match(r".*\((.+)\)$", r["name"])
+        expected.setdefault(r["city"], set()).add(m.group(1) if m else r["name"])
+    readme = Path("README.md").read_text(encoding="utf-8")
+    listed = {city: {i.strip() for i in items.split(",")}
+              for city, items in re.findall(r"^\d\. \*\*(.+?):\*\* (.+)\.$", readme, re.M)}
+    assert listed == expected
