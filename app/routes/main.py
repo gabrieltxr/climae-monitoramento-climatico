@@ -6,6 +6,7 @@ from app.models import db, Region, WeatherObservation, Occurrence, RiskAssessmen
 from app.services.risk_engine import calculate_region_risk
 from app.collectors.traffic_collector import get_traffic_panel_data, update_highway_conditions
 from app.collectors.inmet import get_region_station_summary
+from app.collectors.inmet_avisos import get_active_warnings, get_region_warnings
 
 main_bp = Blueprint('main', __name__)
 
@@ -79,6 +80,7 @@ def api_region_weather(region_id):
     return jsonify({
         "region": region.to_dict(),
         "station": station,
+        "official_warnings": get_region_warnings(region),
         "current": {
             "observed_at": to_utc_iso(current_obs.observed_at) if current_obs else None,
             "collected_at": to_utc_iso(current_obs.collected_at) if current_obs and current_obs.collected_at else None,
@@ -305,6 +307,12 @@ def api_traffic_check():
         "status": "ok",
         "last_updated_at": ts
     })
+
+@main_bp.route('/api/official-warnings')
+def api_official_warnings():
+    """Avisos oficiais do INMET vigentes ou futuros que atingem algum município monitorado."""
+    return jsonify({"warnings": get_active_warnings()})
+
 
 @main_bp.route("/api/alerts", methods=["GET"])
 def get_alerts():

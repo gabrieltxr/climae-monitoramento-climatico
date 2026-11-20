@@ -1265,6 +1265,8 @@
             </div>
             <!-- Medição real da estação INMET mais próxima (só aparece quando há dado) -->
             <div class="meta-info" id="stationMeta" style="display:none; margin-top:8px;"></div>
+            <!-- Avisos oficiais do INMET para o município da região (só aparece quando há aviso) -->
+            <div id="officialWarnings" style="display:none; margin-top:8px;"></div>
 
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 0.55rem; flex-wrap:wrap;">
                 <span class="meta-info">Tendência Horária — Próximas 24h (Horário de Brasília)</span>
@@ -2633,6 +2635,31 @@
                 stationEl.innerText = '';
                 stationEl.style.display = 'none';
             }
+
+            // Avisos oficiais do INMET (texto externo: montado com textContent, nunca innerHTML)
+            const warnEl = document.getElementById('officialWarnings');
+            const warnings = data.official_warnings || [];
+            warnEl.replaceChildren();
+            warnings.forEach(w => {
+                const line = document.createElement('div');
+                line.className = 'meta-info';
+                line.style.borderLeft = `4px solid ${/^#[0-9a-fA-F]{6}$/.test(w.color || '') ? w.color : '#f59e0b'}`;
+                line.style.paddingLeft = '6px';
+                const when = w.in_effect
+                    ? `em vigor até ${formatBRT(w.ends_at)}`
+                    : `de ${formatBRT(w.starts_at)} até ${formatBRT(w.ends_at)}`;
+                line.append(`⚠️ Aviso oficial INMET: ${w.event} — ${w.severity} (${when}) `);
+                const link = document.createElement('a');
+                link.href = w.link;
+                link.target = '_blank';
+                link.rel = 'noopener noreferrer';
+                link.textContent = 'ver aviso';
+                link.style.color = 'inherit';
+                link.style.textDecoration = 'underline';
+                line.append(link);
+                warnEl.append(line);
+            });
+            warnEl.style.display = warnings.length ? '' : 'none';
 
             if (data.region && map) {
                 map.panTo([data.region.latitude, data.region.longitude]);

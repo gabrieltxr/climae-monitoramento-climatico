@@ -106,6 +106,20 @@ LEGACY_REGION_NAMES = {
 
 REGION_NAMES = {(r["city"], r["name"]) for r in REGIONS}
 
+# Código IBGE de cada município (usado para casar os avisos oficiais do INMET, que
+# listam os municípios atingidos por geocode).
+MUNICIPALITY_GEOCODES = {
+    "Rio Grande": "4315602",
+    "Pelotas": "4314407",
+    "São Lourenço do Sul": "4318804",
+    "São José do Norte": "4318507",
+    "Canguçu": "4304507",
+    "Jaguarão": "4311007",
+    "Santa Vitória do Palmar": "4317301",
+    "Chuí": "4305439",
+}
+GEOCODE_MUNICIPALITIES = {code: city for city, code in MUNICIPALITY_GEOCODES.items()}
+
 
 def resolve_region_name(municipality: str, name: str) -> str | None:
     """Nome atual da região (aceita nomes antigos); None se não houver correspondente."""

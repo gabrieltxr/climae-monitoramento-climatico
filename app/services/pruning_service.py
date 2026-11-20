@@ -1,6 +1,6 @@
 import logging
 from datetime import datetime, timedelta, timezone
-from app.models import db, WeatherObservation, RiskAssessment, StationObservation
+from app.models import db, WeatherObservation, RiskAssessment, StationObservation, OfficialWarning
 
 logger = logging.getLogger(__name__)
 
@@ -57,14 +57,29 @@ def prune_old_station_observations(retention_days: int = 7) -> int:
     return deleted
 
 
+def prune_old_official_warnings(retention_days: int = 7) -> int:
+    """Remove avisos oficiais do INMET encerrados há mais de retention_days."""
+    cutoff_naive = (datetime.now(timezone.utc) - timedelta(days=retention_days)).replace(tzinfo=None)
+    deleted = (
+        OfficialWarning.query
+        .filter(OfficialWarning.ends_at < cutoff_naive)
+        .delete(synchronize_session=False)
+    )
+    db.session.commit()
+    logger.info("Purga de avisos oficiais INMET (> %dd do fim): %d registros removidos.", retention_days, deleted)
+    return deleted
+
+
 def prune_expired_data(forecast_retention_hours: int = 24, risk_retention_days: int = 30) -> dict:
     """Executa a limpeza geral de registros temporários expirados."""
     try:
         deleted_fc = prune_expired_forecasts(forecast_retention_hours)
         deleted_risk = prune_old_risk_assessments(risk_retention_days)
         deleted_station = prune_old_station_observations()
+        deleted_warnings = prune_old_official_warnings()
         return {
             "deleted_station_observations": deleted_station,
+            "deleted_official_warnings": deleted_warnings,
             "deleted_forecasts": deleted_fc,
             "deleted_risk_assessments": deleted_risk,
             "status": "success"
