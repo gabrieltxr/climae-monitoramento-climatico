@@ -6,6 +6,7 @@ from app.collectors.open_meteo import collect_all_regions
 from app.collectors.traffic_collector import update_highway_conditions
 from app.collectors.inmet import collect_inmet_stations
 from app.collectors.inmet_avisos import sync_official_warnings
+from app.collectors.inmet_previsao import sync_official_forecasts
 from app.services.alert_engine import run_alert_engine, evaluate_and_record_alerts
 from app.services.pruning_service import prune_expired_data
 from app.services.monthly_consolidation import consolidate_closed_month
@@ -44,6 +45,12 @@ def run_scheduled_cycle(app):
                 sync_official_warnings()
             except Exception as e:
                 logger.error("[SCHEDULER] Falha na coleta dos avisos oficiais do INMET: %s", e)
+
+            # Previsão oficial do INMET por município (cada um no máximo a cada INMET_PREVISAO_HOURS).
+            try:
+                sync_official_forecasts()
+            except Exception as e:
+                logger.error("[SCHEDULER] Falha na coleta da previsão oficial do INMET: %s", e)
 
             print("[SCHEDULER] 3. Avaliando índices de risco e gerando alertas...")
             logger.info("[SCHEDULER] 3. Avaliando índices de risco e gerando alertas...")

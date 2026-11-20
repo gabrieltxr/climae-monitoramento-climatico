@@ -1267,6 +1267,8 @@
             <div class="meta-info" id="stationMeta" style="display:none; margin-top:8px;"></div>
             <!-- Avisos oficiais do INMET para o município da região (só aparece quando há aviso) -->
             <div id="officialWarnings" style="display:none; margin-top:8px;"></div>
+            <!-- Previsão oficial do INMET para o município (texto; só aparece quando há dado) -->
+            <div id="officialForecast" class="meta-info" style="display:none; margin-top:8px;"></div>
 
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 0.55rem; flex-wrap:wrap;">
                 <span class="meta-info">Tendência Horária — Próximas 24h (Horário de Brasília)</span>
@@ -2674,6 +2676,30 @@
                 warnEl.append(line);
             });
             warnEl.style.display = warnings.length ? '' : 'none';
+
+            // Previsão oficial do INMET (texto externo: só textContent). Mínimo funcional;
+            // o visual fica para a reconstrução do frontend.
+            const fcEl = document.getElementById('officialForecast');
+            const ofc = data.official_forecast;
+            fcEl.replaceChildren();
+            if (ofc && Array.isArray(ofc.days) && ofc.days.length) {
+                const periodNames = { manha: 'manhã', tarde: 'tarde', noite: 'noite' };
+                const title = document.createElement('div');
+                title.textContent = `📋 Previsão oficial INMET — ${ofc.municipality} (consultada em ${formatBRT(ofc.fetched_at)})`;
+                fcEl.append(title);
+                ofc.days.forEach(d => {
+                    const [y, m, dd] = d.date.split('-').map(Number);
+                    const label = new Date(y, m - 1, dd).toLocaleDateString('pt-BR', { weekday: 'short', day: '2-digit', month: '2-digit' });
+                    const temps = (d.temp_min != null && d.temp_max != null) ? `${d.temp_min}–${d.temp_max} °C` : '-- °C';
+                    const texts = d.periods.map(p => periodNames[p.period] ? `${periodNames[p.period]}: ${p.summary}` : p.summary);
+                    const line = document.createElement('div');
+                    line.textContent = `• ${label}: ${temps} — ${texts.join('; ')}`;
+                    fcEl.append(line);
+                });
+                fcEl.style.display = '';
+            } else {
+                fcEl.style.display = 'none';
+            }
 
             if (data.region && map) {
                 map.panTo([data.region.latitude, data.region.longitude]);

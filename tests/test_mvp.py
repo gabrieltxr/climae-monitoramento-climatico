@@ -1602,7 +1602,7 @@ def test_legacy_create_all_database_is_stamped_and_upgraded(tmp_path):
     from app.db_schema import ensure_schema
     app = _file_db_app(tmp_path, "legado.db")
     with app.app_context():
-        later_tables = {"station_observations", "official_warnings"}  # criadas pelas migrations 0002/0003
+        later_tables = {"station_observations", "official_warnings", "official_forecasts"}  # migrations 0002–0004
         legacy_tables = [t for name, t in db.metadata.tables.items() if name not in later_tables]
         db.metadata.create_all(db.engine, tables=legacy_tables)
         db.session.add(Region(municipality="Pelotas", name="Pelotas (Centro)", latitude=-31.7, longitude=-52.3))
@@ -1612,7 +1612,7 @@ def test_legacy_create_all_database_is_stamped_and_upgraded(tmp_path):
         assert Region.query.count() == 1
         assert later_tables <= set(inspect(db.engine).get_table_names())
         with db.engine.connect() as conn:
-            assert conn.execute(text("select version_num from alembic_version")).scalar() == "0003_official_warnings"
+            assert conn.execute(text("select version_num from alembic_version")).scalar() == "0004_official_forecasts"
         assert _schema_diffs() == []
         db.session.remove()
         db.engine.dispose()
@@ -1849,3 +1849,109 @@ def test_full_refresh_minutes_from_env(monkeypatch):
     for bad in ("abc", "0", "-5"):
         monkeypatch.setenv("INMET_AVISOS_FULL_REFRESH_MINUTES", bad)
         assert get_full_refresh_minutes() == 60
+
+
+# --- Previsão oficial do INMET por município ---
+
+def _turno(resumo, tmin=18, tmax=31, **extra):
+    return {"uf": "RS", "entidade": "Rio Grande", "resumo": resumo, "temp_max": tmax, "temp_min": tmin,
+            "dir_vento": "NE-E", "int_vento": "Fracos", "cod_icone": "34",
+            "icone": "data:image/png;base64,AAAA", "umidade_max": 100, "umidade_min": 50, **extra}
+
+
+def _previsao(geocode="4315602", resumo="Muitas nuvens"):
+    return {geocode: {
+        "20/11/2026": {"manha": _turno(resumo), "tarde": _turno("Chuva isolada"), "noite": _turno("Nublado")},
+        "22/11/2026": _turno("Muitas nuvens com possibilidade de chuva isolada", tmin=17, tmax=32),
+        "xx/11/2026": _turno("data inválida"),
+    }}
+
+
+def _fake_previsao(monkeypatch, responder):
+    """responder(geocode) -> dict (200 JSON) ou int (status HTTP)."""
+    from app.collectors import inmet_previsao
+    calls = []
+
+    def fake_get(url, timeout=None):
+        geocode = url.rsplit("/", 1)[-1]
+        calls.append(geocode)
+        return _AvisosResp(responder(geocode))
+    monkeypatch.setattr(inmet_previsao.http_session, "get", fake_get)
+    return calls
+
+
+def test_parse_forecast_periods_flat_days_and_drops_icons():
+    from datetime import date
+    from app.collectors.inmet_previsao import parse_forecast
+    rows = parse_forecast(_previsao(), "4315602")
+    assert [(r["forecast_date"], r["period"]) for r in rows] == [
+        (date(2026, 11, 20), "manha"), (date(2026, 11, 20), "tarde"), (date(2026, 11, 20), "noite"),
+        (date(2026, 11, 22), "dia"),
+    ]
+    assert rows[0]["summary"] == "Muitas nuvens" and rows[0]["temp_max"] == 31.0
+    assert rows[3]["temp_min"] == 17.0 and rows[0]["icon_code"] == "34"
+    assert all("icone" not in r for r in rows)
+    assert parse_forecast(_previsao(), "4314407") is None       # geocode de outro município
+    assert parse_forecast({"4315602": {}}, "4315602") is None
+    assert parse_forecast(["x"], "4315602") is None
+
+
+def test_sync_official_forecasts_replaces_respects_interval_and_keeps_on_failure(client, monkeypatch):
+    from datetime import timedelta
+    from app.collectors.inmet_previsao import sync_official_forecasts
+    from app.models import OfficialForecast
+    monkeypatch.delenv("INMET_PREVISAO_HOURS", raising=False)
+    now = datetime(2026, 11, 20, 12, tzinfo=timezone.utc)
+    calls = _fake_previsao(monkeypatch, lambda g: _previsao(g))
+
+    assert sync_official_forecasts(now=now) == {"updated": 8, "skipped": 0, "failed": 0}
+    assert OfficialForecast.query.count() == 8 * 4
+
+    # Dentro do intervalo de 3 h: nenhuma consulta.
+    assert sync_official_forecasts(now=now + timedelta(hours=2)) == {"updated": 0, "skipped": 8, "failed": 0}
+    assert len(calls) == 8
+
+    # Depois do intervalo: substitui (não acumula); falha de um município mantém a previsão dele.
+    _fake_previsao(monkeypatch, lambda g: 500 if g == "4314407" else _previsao(g, resumo="Céu claro"))
+    assert sync_official_forecasts(now=now + timedelta(hours=4)) == {"updated": 7, "skipped": 0, "failed": 1}
+    assert OfficialForecast.query.count() == 8 * 4
+    pelotas = OfficialForecast.query.filter_by(geocode="4314407", period="manha").one()
+    assert pelotas.summary == "Muitas nuvens" and pelotas.fetched_at == datetime(2026, 11, 20, 12)
+    rio_grande = OfficialForecast.query.filter_by(geocode="4315602", period="manha").one()
+    assert rio_grande.summary == "Céu claro"
+
+
+def test_region_weather_includes_official_forecast_from_today(client, monkeypatch):
+    from datetime import timedelta
+    from app.collectors.inmet_previsao import sync_official_forecasts
+    brt = timezone(timedelta(hours=-3))
+    today = datetime.now(timezone.utc).astimezone(brt).date()
+    fmt = lambda d: d.strftime("%d/%m/%Y")
+    payload = lambda g: {g: {
+        fmt(today - timedelta(days=1)): _turno("Ontem"),
+        fmt(today): {"manha": _turno("Manhã nublada"), "noite": _turno("Noite limpa")},
+        fmt(today + timedelta(days=2)): _turno("Depois de amanhã", tmin=15, tmax=24),
+    }}
+    _fake_previsao(monkeypatch, payload)
+    sync_official_forecasts()
+
+    region_id = Region.query.first().id  # Rio Grande
+    fc = client.get(f"/api/weather/{region_id}").get_json()["official_forecast"]
+    assert fc["municipality"] == "Rio Grande" and fc["fetched_at"].endswith("+00:00")
+    assert [d["date"] for d in fc["days"]] == [today.isoformat(), (today + timedelta(days=2)).isoformat()]
+    assert [p["period"] for p in fc["days"][0]["periods"]] == ["manha", "noite"]
+    assert fc["days"][1]["temp_min"] == 15 and fc["days"][1]["periods"][0]["period"] == "dia"
+
+
+def test_region_weather_without_official_forecast(client):
+    region_id = Region.query.first().id
+    assert client.get(f"/api/weather/{region_id}").get_json()["official_forecast"] is None
+
+
+def test_forecast_interval_env(monkeypatch):
+    from app.collectors.inmet_previsao import get_interval_hours
+    monkeypatch.setenv("INMET_PREVISAO_HOURS", "6")
+    assert get_interval_hours() == 6
+    for bad in ("abc", "0", "-1"):
+        monkeypatch.setenv("INMET_PREVISAO_HOURS", bad)
+        assert get_interval_hours() == 3

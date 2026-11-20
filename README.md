@@ -158,6 +158,14 @@ Acesse a aplicação no navegador em: **`http://127.0.0.1:5000`**
 > ciclo faz só um HEAD (~2 KB) e baixa a lista quando o tamanho dela muda, ou a cada
 > `INMET_AVISOS_FULL_REFRESH_MINUTES` (padrão 60) para pegar mudanças que não alteram o
 > tamanho.
+>
+> **Previsão oficial do INMET por município (automático, sem token):** o agendador lê a
+> previsão de 5 dias de cada um dos 8 municípios (`apiprevmet3.inmet.gov.br/previsao/{código IBGE}`)
+> no máximo a cada `INMET_PREVISAO_HOURS` (padrão 3) e guarda só a última (resumo em texto,
+> temperatura mínima/máxima, umidade e vento descritivo; dias 1–2 por turno). Aparece no painel
+> da região, abaixo dos avisos. Não traz chuva em mm nem probabilidade, por isso fica fora do
+> índice de risco e dos alertas. Cada município custa ~250 KB por consulta (quase tudo ícone,
+> que o CLIMAE descarta), ~16 MB/dia no padrão.
 
 ---
 

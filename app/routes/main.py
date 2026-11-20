@@ -7,6 +7,7 @@ from app.services.risk_engine import calculate_region_risk
 from app.collectors.traffic_collector import get_traffic_panel_data, update_highway_conditions
 from app.collectors.inmet import get_region_station_summary
 from app.collectors.inmet_avisos import get_active_warnings, get_region_warnings
+from app.collectors.inmet_previsao import get_region_forecast
 
 main_bp = Blueprint('main', __name__)
 
@@ -81,6 +82,7 @@ def api_region_weather(region_id):
         "region": region.to_dict(),
         "station": station,
         "official_warnings": get_region_warnings(region),
+        "official_forecast": get_region_forecast(region),
         "current": {
             "observed_at": to_utc_iso(current_obs.observed_at) if current_obs else None,
             "collected_at": to_utc_iso(current_obs.collected_at) if current_obs and current_obs.collected_at else None,
