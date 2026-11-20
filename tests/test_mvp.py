@@ -1408,7 +1408,9 @@ def test_weather_summary_batches_queries_and_picks_latest(client):
         db.session.add_all([
             RiskAssessment(region_id=r.id, assessed_at=hour - timedelta(hours=3), risk_level="Alto",
                            score=60, method_version="t"),
-            RiskAssessment(region_id=r.id, assessed_at=hour - timedelta(minutes=10), risk_level="Moderado",
+            RiskAssessment(region_id=r.id,
+                           assessed_at=datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(minutes=10),
+                           risk_level="Moderado",
                            score=30 + idx, method_version="t"),
         ])
     db.session.commit()
@@ -1437,7 +1439,37 @@ def test_weather_summary_batches_queries_and_picks_latest(client):
         assert row["observed_at"].endswith("+00:00")
     blank = by_id[empty.id]
     assert blank["temperature_c"] is None and blank["observed_at"] is None
-    assert blank["rain_next_24h_mm"] == 0 and blank["risk_level"] == "Baixo"
+    assert blank["rain_next_24h_mm"] == 0
+    # Sem avaliação = sem dado, nunca "Baixo"/0.
+    assert blank["risk_level"] is None and blank["risk_score"] is None
+    assert blank["risk_assessed_at"] is None
+
+
+def test_weather_summary_hides_stale_risk(client):
+    from datetime import timedelta
+    from app.models import RiskAssessment
+    from app.routes.main import RISK_MAX_AGE_MINUTES
+    region = Region.query.first()
+    old = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(minutes=RISK_MAX_AGE_MINUTES + 5)
+    db.session.add(RiskAssessment(region_id=region.id, assessed_at=old, risk_level="Alto",
+                                  score=61, method_version="t"))
+    db.session.commit()
+
+    row = next(r for r in client.get("/api/weather-summary?format=list").get_json()
+               if r["region_id"] == region.id)
+    # Avaliação velha não aparece como atual; a data fica para quem quiser mostrar.
+    assert row["risk_level"] is None and row["risk_score"] is None
+    assert row["risk_assessed_at"].startswith(old.isoformat()[:16])
+
+
+def test_map_risk_colors_cover_engine_levels():
+    # O mapa já esperou "Médio" (o motor gera "Moderado") e comparava o texto exato,
+    # deixando Moderado, "(Provisório)" e Inconclusivo verdes.
+    from pathlib import Path
+    html = (Path(__file__).resolve().parents[1] / "app" / "templates" / "index.html").read_text(encoding="utf-8")
+    assert "'Médio'" not in html
+    assert "function riskBaseLevel" in html
+    assert "startsWith('moderado')" in html
 
 
 # --- GET /api/risk não grava e não devolve avaliação velha ---

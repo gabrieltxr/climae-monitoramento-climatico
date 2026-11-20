@@ -160,6 +160,9 @@ def get_weather_summary():
         rain_24h = sum((f.precipitation_mm or 0.0) for f in forecasts)
         fc = forecasts[0] if forecasts else None
         risk = latest_risk.get(r.id)
+        # Sem avaliação recente = "sem dado" (null), nunca "Baixo": o mapa não pode
+        # pintar de verde o que não sabe nem mostrar como atual um risco de dias atrás.
+        risk_current = risk is not None and not _is_older_than(risk.assessed_at, RISK_MAX_AGE_MINUTES)
         summary.append({
             "region_id": r.id,
             "municipality": r.municipality,
@@ -175,8 +178,9 @@ def get_weather_summary():
             "precipitation_mm": current_obs.precipitation_mm if current_obs else 0.0,
             "rain_probability": fc.rain_probability if fc else 0,
             "rain_next_24h_mm": round(rain_24h, 1),
-            "risk_score": risk.score if risk else 0.0,
-            "risk_level": risk.risk_level if risk else "Baixo",
+            "risk_score": risk.score if risk_current else None,
+            "risk_level": risk.risk_level if risk_current else None,
+            "risk_assessed_at": to_utc_iso(risk.assessed_at) if risk else None,
             "observed_at": (
                 current_obs.observed_at.replace(tzinfo=timezone.utc).isoformat()
                 if current_obs and current_obs.observed_at else None
