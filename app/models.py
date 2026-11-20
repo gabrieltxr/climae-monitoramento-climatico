@@ -301,3 +301,42 @@ class StationObservation(db.Model):
     __table_args__ = (
         db.UniqueConstraint('station_code', 'observed_at', name='uq_station_observed_at'),
     )
+
+
+class OfficialWarning(db.Model):
+    """
+    Avisos meteorológicos oficiais do INMET (apiprevmet3.inmet.gov.br/avisos/ativos) que
+    atingem algum dos 8 municípios monitorados. Cada versão de um aviso (id_aviso +
+    id_sequencia) tem um inmet_id próprio e vira uma linha. Fica fora dos alertas próprios
+    (Alert) e do índice de risco: é exibido à parte e gera um único e-mail por versão.
+    Horários em UTC (o INMET publica em horário de Brasília).
+    """
+    __tablename__ = 'official_warnings'
+
+    id = db.Column(db.Integer, primary_key=True)
+    inmet_id = db.Column(db.String(20), nullable=False, unique=True)    # "id": muda a cada versão
+    warning_number = db.Column(db.String(20), nullable=False)           # "id_aviso"
+    sequence = db.Column(db.Integer, nullable=True)                     # "id_sequencia"
+    event = db.Column(db.String(100), nullable=False)                   # Ex: "Tempestade"
+    severity = db.Column(db.String(50), nullable=False)                 # Ex: "Perigo Potencial"
+    severity_level = db.Column(db.Integer, nullable=True)               # "id_severidade"
+    color = db.Column(db.String(10), nullable=True)                     # Ex: "#FFFE00"
+    starts_at = db.Column(db.DateTime(timezone=True), nullable=False)
+    ends_at = db.Column(db.DateTime(timezone=True), nullable=False)
+    geocodes = db.Column(db.Text, nullable=False)                       # Só os monitorados, separados por vírgula
+    risks = db.Column(db.Text, nullable=True)
+    instructions = db.Column(db.Text, nullable=True)
+    first_seen_at = db.Column(db.DateTime(timezone=True), nullable=False)
+    last_seen_at = db.Column(db.DateTime(timezone=True), nullable=False)
+    # Saiu da lista de ativos antes do fim (cancelado ou substituído por nova versão).
+    withdrawn_at = db.Column(db.DateTime(timezone=True), nullable=True)
+    notified_at = db.Column(db.DateTime(timezone=True), nullable=True)
+    notification_status = db.Column(db.String(30), nullable=True)
+
+    __table_args__ = (
+        db.Index('ix_official_warnings_ends_at', 'ends_at'),
+    )
+
+    @property
+    def link(self) -> str:
+        return f"https://avisos.inmet.gov.br/{self.inmet_id}"

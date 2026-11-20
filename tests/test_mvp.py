@@ -1565,21 +1565,22 @@ def test_migrations_build_exactly_the_models(tmp_path):
 
 
 def test_legacy_create_all_database_is_stamped_and_upgraded(tmp_path):
-    """Banco antigo (create_all, sem alembic_version, sem a tabela do INMET) não é recriado."""
+    """Banco antigo (create_all, sem alembic_version, sem as tabelas do INMET) não é recriado."""
     from sqlalchemy import inspect, text
     from app.db_schema import ensure_schema
     app = _file_db_app(tmp_path, "legado.db")
     with app.app_context():
-        legacy_tables = [t for name, t in db.metadata.tables.items() if name != "station_observations"]
+        later_tables = {"station_observations", "official_warnings"}  # criadas pelas migrations 0002/0003
+        legacy_tables = [t for name, t in db.metadata.tables.items() if name not in later_tables]
         db.metadata.create_all(db.engine, tables=legacy_tables)
         db.session.add(Region(municipality="Pelotas", name="Pelotas (Centro)", latitude=-31.7, longitude=-52.3))
         db.session.commit()
 
         assert ensure_schema() == "legado_marcado"
         assert Region.query.count() == 1
-        assert "station_observations" in inspect(db.engine).get_table_names()
+        assert later_tables <= set(inspect(db.engine).get_table_names())
         with db.engine.connect() as conn:
-            assert conn.execute(text("select version_num from alembic_version")).scalar() == "0002_station_observations"
+            assert conn.execute(text("select version_num from alembic_version")).scalar() == "0003_official_warnings"
         assert _schema_diffs() == []
         db.session.remove()
         db.engine.dispose()
@@ -1604,3 +1605,215 @@ def test_carto_key_comes_from_config_not_from_template():
             html = app.test_client().get("/").get_data(as_text=True)
             db.drop_all()
         assert expected in html
+
+
+# --- Avisos oficiais do INMET ---
+
+def _aviso(inmet_id="56455", geocodes="4314407,4315602,5200050", inicio="2026-11-20 09:06",
+           fim="2026-11-20 23:59", seq="1", **extra):
+    item = {"id": inmet_id, "id_aviso": "28733", "id_sequencia": seq, "descricao": "Tempestade",
+            "severidade": "Perigo Potencial", "id_severidade": 6, "aviso_cor": "#FFFE00",
+            "inicio": inicio, "fim": fim, "geocodes": geocodes, "encerrado": "False",
+            "riscos": ["Chuva entre 20 e 30 mm/h."], "instrucoes": ["Evite áreas alagadas. ", "Ligue 199."]}
+    item.update(extra)
+    return item
+
+
+class _AvisosResp:
+    def __init__(self, payload, headers=None):
+        import json
+        self.status_code = payload if isinstance(payload, int) else 200
+        self._payload = payload
+        self.content = b"" if isinstance(payload, int) else json.dumps(payload).encode()
+        self.headers = headers or {}
+
+    def json(self):
+        return self._payload
+
+
+def _fake_avisos(monkeypatch, payloads):
+    """
+    Cada GET devolve o próximo payload (dict = 200 JSON; int = status HTTP). O HEAD responde
+    405 (sem tamanho), então todo ciclo baixa a lista completa.
+    """
+    from app.collectors import inmet_avisos
+    inmet_avisos.reset_download_state()
+    queue = list(payloads)
+    monkeypatch.setattr(inmet_avisos.http_session, "get", lambda url, timeout=None: _AvisosResp(queue.pop(0)))
+    monkeypatch.setattr(inmet_avisos.http_session, "head", lambda url, **kw: _AvisosResp(405))
+    sent = []
+    monkeypatch.setattr(inmet_avisos, "send_email_notification", lambda s, b: sent.append((s, b)) or "enviado_email")
+    return sent
+
+
+def test_parse_warning_matches_by_geocode_and_converts_brasilia_time():
+    from app.collectors.inmet_avisos import parse_warning
+    w = parse_warning(_aviso())
+    assert w["geocodes"] == "4315602,4314407"  # só os monitorados, na ordem do catálogo
+    assert w["starts_at"] == datetime(2026, 11, 20, 12, 6)  # 09:06 BRT = 12:06 UTC
+    assert w["ends_at"] == datetime(2026, 11, 21, 2, 59)
+    assert w["instructions"] == "Evite áreas alagadas.\nLigue 199."
+    assert w["sequence"] == 1 and w["severity_level"] == 6
+    assert parse_warning(_aviso(geocodes="5200050,3100104")) is None   # fora da Zona Sul
+    assert parse_warning(_aviso(encerrado="True")) is None
+    assert parse_warning(_aviso(inicio="")) is None
+    assert parse_warning(_aviso(inmet_id="1/../x")) is None
+
+
+def test_every_catalog_municipality_has_geocode():
+    from app.regions_catalog import REGIONS, MUNICIPALITY_GEOCODES
+    assert {r["city"] for r in REGIONS} == set(MUNICIPALITY_GEOCODES)
+
+
+def test_sync_official_warnings_upserts_withdraws_and_notifies_once(client, monkeypatch):
+    from app.collectors.inmet_avisos import sync_official_warnings
+    from app.models import OfficialWarning
+    now = datetime(2026, 11, 20, 10, tzinfo=timezone.utc)
+    v2 = _aviso(inmet_id="56470", seq="2")
+    sent = _fake_avisos(monkeypatch, [
+        {"hoje": [], "futuro": [_aviso(), _aviso(inmet_id="99", geocodes="5200050")]},
+        {"hoje": [], "futuro": [_aviso()]},
+        500,                                   # falha: não retira nada
+        {"hoje": [v2], "futuro": []},          # nova versão substitui a anterior
+    ])
+    first = sync_official_warnings(now=now)
+    assert first == {"status": "ok", "downloaded": True, "active": 1, "new": 1, "withdrawn": 0, "notified": 1}
+    assert "Tempestade" in sent[0][0] and "Rio Grande, Pelotas" in sent[0][1]
+    assert "20/11/2026 09:06" in sent[0][1]
+
+    second = sync_official_warnings(now=now)
+    assert second["new"] == 0 and second["notified"] == 0 and len(sent) == 1
+
+    assert sync_official_warnings(now=now)["status"] == "falha"
+    assert OfficialWarning.query.filter(OfficialWarning.withdrawn_at.is_(None)).count() == 1
+
+    fourth = sync_official_warnings(now=now)
+    assert fourth["new"] == 1 and fourth["withdrawn"] == 1 and len(sent) == 2
+    assert "versão 2" in sent[1][0]
+    assert OfficialWarning.query.filter_by(inmet_id="56455").one().withdrawn_at is not None
+
+
+def test_sync_retries_email_after_smtp_error(client, monkeypatch):
+    from app.collectors import inmet_avisos
+    now = datetime(2026, 11, 20, 10, tzinfo=timezone.utc)
+    _fake_avisos(monkeypatch, [{"hoje": [_aviso()], "futuro": []}] * 2)
+    statuses = iter(["erro_envio", "enviado_email"])
+    monkeypatch.setattr(inmet_avisos, "send_email_notification", lambda s, b: next(statuses))
+    assert inmet_avisos.sync_official_warnings(now=now)["notified"] == 0
+    assert inmet_avisos.sync_official_warnings(now=now)["notified"] == 1
+
+
+def test_sync_rejects_unexpected_format(client, monkeypatch):
+    from app.collectors.inmet_avisos import sync_official_warnings
+    _fake_avisos(monkeypatch, [{"avisos": []}, ["x"]])
+    assert sync_official_warnings()["status"] == "falha"
+    assert sync_official_warnings()["status"] == "falha"
+
+
+def test_official_warnings_api_and_region_weather(client, monkeypatch):
+    from datetime import timedelta
+    from app.collectors.inmet_avisos import sync_official_warnings
+    brt = timezone(timedelta(hours=-3))
+    now_brt = datetime.now(timezone.utc).astimezone(brt)
+    fmt = "%Y-%m-%d %H:%M"
+    em_vigor = _aviso(inicio=(now_brt - timedelta(hours=1)).strftime(fmt), fim=(now_brt + timedelta(hours=5)).strftime(fmt))
+    futuro = _aviso(inmet_id="56456", geocodes="4314407",
+                    inicio=(now_brt + timedelta(hours=10)).strftime(fmt), fim=(now_brt + timedelta(hours=20)).strftime(fmt))
+    vencido = _aviso(inmet_id="56457", inicio=(now_brt - timedelta(hours=9)).strftime(fmt),
+                     fim=(now_brt - timedelta(hours=1)).strftime(fmt))
+    _fake_avisos(monkeypatch, [{"hoje": [em_vigor, vencido], "futuro": [futuro]}])
+    sync_official_warnings()
+
+    listed = client.get("/api/official-warnings").get_json()["warnings"]
+    assert [w["id"] for w in listed] == ["56455", "56456"]
+    assert listed[0]["in_effect"] is True and listed[1]["in_effect"] is False
+    assert listed[0]["municipalities"] == ["Rio Grande", "Pelotas"]
+    assert listed[0]["link"] == "https://avisos.inmet.gov.br/56455"
+    assert listed[0]["starts_at"].endswith("+00:00")
+
+    region_id = Region.query.first().id  # região de Rio Grande: o aviso só de Pelotas não entra
+    weather = client.get(f"/api/weather/{region_id}").get_json()
+    assert [w["id"] for w in weather["official_warnings"]] == ["56455"]
+
+
+def test_prune_removes_old_official_warnings(client):
+    from datetime import timedelta
+    from app.models import OfficialWarning
+    from app.services.pruning_service import prune_old_official_warnings
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    for inmet_id, ended_days_ago in (("1", 10), ("2", 2)):
+        db.session.add(OfficialWarning(
+            inmet_id=inmet_id, warning_number=inmet_id, event="Tempestade", severity="Perigo",
+            starts_at=now - timedelta(days=ended_days_ago, hours=5), ends_at=now - timedelta(days=ended_days_ago),
+            geocodes="4314407", first_seen_at=now, last_seen_at=now))
+    db.session.commit()
+    assert prune_old_official_warnings() == 1
+    assert [w.inmet_id for w in OfficialWarning.query.all()] == ["2"]
+
+
+def test_sync_uses_head_and_downloads_only_on_change_or_hourly(client, monkeypatch):
+    import requests
+    from datetime import timedelta
+    from app.collectors import inmet_avisos
+    monkeypatch.delenv("INMET_AVISOS_FULL_REFRESH_MINUTES", raising=False)
+    _fake_avisos(monkeypatch, [])
+    payload = {"hoje": [_aviso()], "futuro": []}
+    size = len(_AvisosResp(payload).content)
+    gets, heads = [], []
+    head_answers = []
+
+    def fake_get(url, timeout=None):
+        gets.append(url)
+        return _AvisosResp(payload)
+
+    def fake_head(url, **kw):
+        heads.append(url)
+        answer = head_answers.pop(0)
+        if isinstance(answer, Exception):
+            raise answer
+        return _AvisosResp(200, headers={"Content-Length": str(answer)})
+
+    monkeypatch.setattr(inmet_avisos.http_session, "get", fake_get)
+    monkeypatch.setattr(inmet_avisos.http_session, "head", fake_head)
+    t0 = datetime(2026, 11, 20, 10, tzinfo=timezone.utc)
+
+    assert inmet_avisos.sync_official_warnings(now=t0)["downloaded"] is True       # 1º ciclo: sem HEAD
+    assert (len(gets), len(heads)) == (1, 0)
+
+    head_answers.append(size)                                                       # tamanho igual
+    same = inmet_avisos.sync_official_warnings(now=t0 + timedelta(minutes=15))
+    assert same["status"] == "sem_mudanca" and same["downloaded"] is False
+    assert (len(gets), len(heads)) == (1, 1)
+
+    head_answers.append(size + 7)                                                   # tamanho mudou
+    assert inmet_avisos.sync_official_warnings(now=t0 + timedelta(minutes=30))["downloaded"] is True
+    assert len(gets) == 2
+
+    head_answers.append(requests.ConnectionError("x"))                              # HEAD falhou
+    assert inmet_avisos.sync_official_warnings(now=t0 + timedelta(minutes=45))["downloaded"] is True
+    assert len(gets) == 3
+
+    head_answers.append(size)                                                       # igual, < 60 min
+    assert inmet_avisos.sync_official_warnings(now=t0 + timedelta(minutes=90))["downloaded"] is False
+    assert inmet_avisos.sync_official_warnings(now=t0 + timedelta(minutes=105))["downloaded"] is True  # 60 min: sem HEAD
+    assert (len(gets), len(heads)) == (4, 4)
+
+
+def test_sync_does_not_remember_failed_download(client, monkeypatch):
+    from datetime import timedelta
+    from app.collectors import inmet_avisos
+    _fake_avisos(monkeypatch, [500, {"hoje": [_aviso()], "futuro": []}])
+    monkeypatch.setattr(inmet_avisos.http_session, "head",
+                        lambda url, **kw: _AvisosResp(200, headers={"Content-Length": "123"}))
+    t0 = datetime(2026, 11, 20, 10, tzinfo=timezone.utc)
+    assert inmet_avisos.sync_official_warnings(now=t0)["status"] == "falha"
+    assert inmet_avisos.sync_official_warnings(now=t0 + timedelta(minutes=15))["downloaded"] is True
+
+
+def test_full_refresh_minutes_from_env(monkeypatch):
+    from app.collectors.inmet_avisos import get_full_refresh_minutes
+    monkeypatch.setenv("INMET_AVISOS_FULL_REFRESH_MINUTES", "30")
+    assert get_full_refresh_minutes() == 30
+    for bad in ("abc", "0", "-5"):
+        monkeypatch.setenv("INMET_AVISOS_FULL_REFRESH_MINUTES", bad)
+        assert get_full_refresh_minutes() == 60

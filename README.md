@@ -146,6 +146,19 @@ Acesse a aplicação no navegador em: **`http://127.0.0.1:5000`**
 > e de Santa Vitória do Palmar — segue só com os modelos. São dados brutos (o INMET não os
 > valida) e ficam guardados por 7 dias.
 
+> **Avisos oficiais do INMET (automático, sem token):** a cada ciclo o agendador lê os avisos
+> ativos do INMET (`apiprevmet3.inmet.gov.br/avisos/ativos`) e guarda os que atingem algum
+> dos 8 municípios (pelo código IBGE do município; todos os bairros dele recebem o aviso).
+> Eles aparecem no painel da região e em `/api/official-warnings`, à parte dos alertas
+> próprios do CLIMAE e sem entrar no índice de risco. Cada aviso novo (ou nova versão)
+> gera um único e-mail-resumo, se o SMTP estiver configurado. Ficam guardados até 7 dias
+> após o fim.
+>
+> Para economizar tráfego (a lista nacional tem ~750 KB e o INMET não a comprime), cada
+> ciclo faz só um HEAD (~2 KB) e baixa a lista quando o tamanho dela muda, ou a cada
+> `INMET_AVISOS_FULL_REFRESH_MINUTES` (padrão 60) para pegar mudanças que não alteram o
+> tamanho.
+
 ---
 
 ## 4. Scripts e Utilitários de Manutenção
