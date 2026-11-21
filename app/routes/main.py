@@ -363,6 +363,26 @@ def get_alerts():
 def health():
     return jsonify({"status": "ok", "phase": "Fase 4 - Risco e Transito ativos"})
 
+def _fmt_c(value) -> str:
+    return f"{value:.1f} °C" if value is not None else "sem dado"
+
+
+def _temp_range_text(normal: dict) -> str:
+    """
+    Faixa de temperatura da normal para o texto da projeção. max_temp_c/min_temp_c são a
+    média dos EXTREMOS do mês (não a faixa do dia); a faixa típica é a média das máximas e
+    das mínimas diárias, que pode faltar enquanto o histórico não foi preenchido.
+    """
+    parts = []
+    if normal.get("mean_min_temp_c") is not None or normal.get("mean_max_temp_c") is not None:
+        parts.append(f"médias diárias: mín {_fmt_c(normal.get('mean_min_temp_c'))} / "
+                     f"máx {_fmt_c(normal.get('mean_max_temp_c'))}")
+    if normal.get("min_temp_c") is not None or normal.get("max_temp_c") is not None:
+        parts.append(f"extremos do mês, média dos anos: mín {_fmt_c(normal.get('min_temp_c'))} / "
+                     f"máx {_fmt_c(normal.get('max_temp_c'))}")
+    return f" ({'; '.join(parts)})" if parts else ""
+
+
 @main_bp.route('/api/climate-history/<int:region_id>')
 def api_climate_history(region_id: int):
     """
@@ -387,6 +407,8 @@ def api_climate_history(region_id: int):
             "avg_temp_c": n.avg_temp_c,
             "max_temp_c": n.max_temp_c,
             "min_temp_c": n.min_temp_c,
+            "mean_max_temp_c": n.mean_max_temp_c,
+            "mean_min_temp_c": n.mean_min_temp_c,
             "total_rain_mm": n.total_rain_mm,
             "rainy_days": n.rainy_days,
             "max_wind_kmh": n.max_wind_kmh,
@@ -414,6 +436,8 @@ def api_climate_history(region_id: int):
             "avg_temp_c": h.avg_temp_c,
             "max_temp_c": h.max_temp_c,
             "min_temp_c": h.min_temp_c,
+            "mean_max_temp_c": h.mean_max_temp_c,
+            "mean_min_temp_c": h.mean_min_temp_c,
             "total_rain_mm": h.total_rain_mm,
             "rainy_days": h.rainy_days,
             "max_wind_kmh": h.max_wind_kmh,
@@ -457,8 +481,7 @@ def api_climate_history(region_id: int):
         outlook_text = (
             f"Projeção Climatológica para o mês {selected_month:02d}: espera-se chuva média em torno de "
             f"{month_normal['total_rain_mm']:.1f} mm (~{month_normal['rainy_days']} dias chuvosos) e "
-            f"temperatura média de {month_normal['avg_temp_c']:.1f} °C "
-            f"(Mín: {month_normal['min_temp_c']:.1f} °C / Máx: {month_normal['max_temp_c']:.1f} °C)."
+            f"temperatura média de {month_normal['avg_temp_c']:.1f} °C{_temp_range_text(month_normal)}."
         )
 
     return jsonify({

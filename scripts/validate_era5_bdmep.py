@@ -9,6 +9,9 @@ Para cada ano pedido o script baixa portal.inmet.gov.br/uploads/dadoshistoricos/
 Regras:
 - Hora UTC do INMET convertida para o horário de Brasília (UTC-3) antes de agrupar por dia.
 - Um mês da estação só entra numa variável se tiver >= MIN_COMPLETENESS das horas válidas.
+- Média das máximas/mínimas diárias: dia vale com >= MIN_COMPLETENESS das 24 horas; mês
+  vale com >= MIN_COMPLETENESS dos dias válidos. Bancos sem a migration 0005 não têm essas
+  colunas: as duas linhas ficam vazias no relatório.
 - Chuva: mês completo com total < SUSPECT_RAIN_RATIO do ERA5 (e ERA5 >= SUSPECT_RAIN_MIN_MM)
   é marcado como "pluviômetro suspeito" e fica fora das estatísticas (aparece listado).
 - Cada estação é comparada com a região mais próxima do banco (até MAX_PAIR_KM).
@@ -113,9 +116,19 @@ def _hours_in_month(year: int, month: int) -> int:
     return (nxt - date(year, month, 1)).days * 24
 
 
+def _mean_of_daily(by_day: dict, pick, days_in_month: int):
+    """Média do extremo diário (max/min das horas) dos dias com horas suficientes;
+    None se o mês não tiver dias válidos suficientes."""
+    daily = [pick(v) for v in by_day.values() if len(v) >= MIN_COMPLETENESS * 24]
+    if len(daily) < MIN_COMPLETENESS * days_in_month:
+        return None
+    return round(sum(daily) / len(daily), 2)
+
+
 def monthly_summary(hours) -> dict:
     """{(ano, mês): {...}}; variável fica None quando o mês não atinge MIN_COMPLETENESS."""
-    by_month = defaultdict(lambda: {"rain": defaultdict(list), "temp": [], "tmax": [], "tmin": []})
+    by_month = defaultdict(lambda: {"rain": defaultdict(list), "temp": [], "tmax": [], "tmin": [],
+                                    "day_tmax": defaultdict(list), "day_tmin": defaultdict(list)})
     for when, rain, temp, tmax, tmin in hours:
         bucket = by_month[(when.year, when.month)]
         if rain is not None:
@@ -124,8 +137,10 @@ def monthly_summary(hours) -> dict:
             bucket["temp"].append(temp)
         if tmax is not None:
             bucket["tmax"].append(tmax)
+            bucket["day_tmax"][when.date()].append(tmax)
         if tmin is not None:
             bucket["tmin"].append(tmin)
+            bucket["day_tmin"][when.date()].append(tmin)
     result = {}
     for (year, month), b in by_month.items():
         expected = _hours_in_month(year, month)
@@ -141,6 +156,8 @@ def monthly_summary(hours) -> dict:
             "avg_temp_c": round(sum(b["temp"]) / len(b["temp"]), 2) if temp_ok else None,
             "max_temp_c": max(b["tmax"]) if temp_ok and b["tmax"] else None,
             "min_temp_c": min(b["tmin"]) if temp_ok and b["tmin"] else None,
+            "mean_max_temp_c": _mean_of_daily(b["day_tmax"], max, expected // 24),
+            "mean_min_temp_c": _mean_of_daily(b["day_tmin"], min, expected // 24),
         }
     return result
 
@@ -163,6 +180,8 @@ VARIABLES = [
     ("avg_temp_c", "Temperatura média (°C)"),
     ("max_temp_c", "Máxima absoluta (°C)"),
     ("min_temp_c", "Mínima absoluta (°C)"),
+    ("mean_max_temp_c", "Média das máximas diárias (°C)"),
+    ("mean_min_temp_c", "Média das mínimas diárias (°C)"),
     ("total_rain_mm", "Chuva do mês (mm)"),
     ("rainy_days", "Dias com chuva ≥ 1 mm"),
 ]
@@ -181,7 +200,7 @@ def compare(station_months: dict, era5: dict) -> tuple[list, list]:
         for field, _ in VARIABLES:
             if field in ("total_rain_mm", "rainy_days") and rain_suspect:
                 continue
-            if s[field] is not None and e[field] is not None:
+            if s.get(field) is not None and e.get(field) is not None:
                 pairs.append((field, year, month, s[field], e[field]))
     return pairs, suspects
 
@@ -212,13 +231,15 @@ def load_era5(db_path: str):
             for r in con.execute("SELECT id, name, latitude, longitude FROM regions")
         ]
         era5 = defaultdict(dict)
+        existing = {r[1] for r in con.execute("PRAGMA table_info(monthly_climate_summaries)")}
+        fields = [f for f, _ in VARIABLES if f in existing]
         for row in con.execute(
-            "SELECT region_id, year, month, avg_temp_c, max_temp_c, min_temp_c, total_rain_mm, rainy_days "
+            f"SELECT region_id, year, month, {', '.join(fields)} "
             "FROM monthly_climate_summaries WHERE year > 0"
         ):
-            era5[row[0]][(row[1], row[2])] = dict(zip(
-                ("avg_temp_c", "max_temp_c", "min_temp_c", "total_rain_mm", "rainy_days"), row[3:]
-            ))
+            values = dict.fromkeys((f for f, _ in VARIABLES), None)
+            values.update(zip(fields, row[3:]))
+            era5[row[0]][(row[1], row[2])] = values
     finally:
         con.close()
     return regions, era5
@@ -325,8 +346,8 @@ def render_report(stations: dict, regions, era5, years) -> str:
     lines += [
         "## Viés por mês do ano (todas as estações)",
         "",
-        "| Mês | Temp. média | Máx. abs. | Mín. abs. | Chuva (mm) | Chuva ERA5/estação | Dias ≥ 1 mm |",
-        "|---|---:|---:|---:|---:|---:|---:|",
+        "| Mês | Temp. média | Máx. abs. | Mín. abs. | Média máx. | Média mín. | Chuva (mm) | Chuva ERA5/estação | Dias ≥ 1 mm |",
+        "|---|---:|---:|---:|---:|---:|---:|---:|---:|",
     ]
     for month in range(1, 13):
         st = stats([p for p in all_pairs if p[2] == month])
@@ -336,6 +357,7 @@ def render_report(stations: dict, regions, era5, years) -> str:
             ratio = f"{st['total_rain_mm'][4] / st['total_rain_mm'][3]:.0%}"
         lines.append(
             f"| {MONTHS_PT[month - 1]} | {cell('avg_temp_c')} | {cell('max_temp_c')} | {cell('min_temp_c')} | "
+            f"{cell('mean_max_temp_c')} | {cell('mean_min_temp_c')} | "
             f"{cell('total_rain_mm')} | {ratio} | {cell('rainy_days')} |"
         )
     lines.append("")

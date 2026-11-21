@@ -60,6 +60,7 @@ Aplicação web modular em Python (Flask) desenvolvida para monitoramento meteor
 * **Série Histórica Contínua:** Dados mensais de **2000 a 2026** obtidos via reanálise global ERA5 (Open-Meteo Archive).
 * **Normais Climatológicas:** Médias históricas dos 12 meses do ano para comparação de desvios e anomalias de temperatura (°C) e precipitação (mm).
 * **Projeção Sazonal:** Diagnóstico automático comparando o mês corrente com o padrão histórico da localidade.
+* **Faixa de temperatura da normal:** duas linhas. *Médias diárias* = média das máximas e das mínimas de cada dia (a faixa típica do dia, comparável à normal do INMET). *Extremos do mês (média dos anos)* = média, ao longo dos anos, da maior máxima e da menor mínima de cada mês — não é recorde. O ERA5 suaviza os extremos em 1 a 3,6 °C frente às estações (ver `scripts/validate_era5_bdmep.py`). As médias diárias ficam "sem dado" até o histórico ser preenchido por `scripts/backfill_daily_temp_means.py`.
 * **Normal oficial INMET 1991–2020 (referência):** para o mês escolhido, mostra a normal da estação convencional mais próxima (Pelotas, Rio Grande ou Santa Vitória do Palmar) até `INMET_NORMALS_MAX_DISTANCE_KM` (padrão 60 km): chuva, dias com chuva ≥ 1 mm, temperatura média e médias das máximas e mínimas. Jaguarão fica a mais de 100 km de todas e não recebe. A estação de Rio Grande tem falhas no período (sem máximas, sem dias de chuva, sem a média de agosto), que aparecem como "sem dado". As anomalias continuam calculadas sobre a normal ERA5.
 
 ### 07. Histórico de Eventos e Ocorrências Documentadas
@@ -178,6 +179,7 @@ Acesse a aplicação no navegador em: **`http://127.0.0.1:5000`**
 * `scripts/run_scheduler.py`: Executa só o agendador (coleta, purga e consolidação mensal) em processo próprio, para uso com servidor WSGI.
 * `scripts/sync_climate_history.py`: Audita a integridade do banco e sincroniza a climatologia ERA5 das 56 regiões.
 * `scripts/seed_monthly_climate.py`: Rotina avançada de carga direta da API ERA5 Open-Meteo.
+* `scripts/backfill_daily_temp_means.py`: Preenche a média das máximas e das mínimas diárias nos meses já gravados (migration 0005) e nas normais, sem mexer nas outras colunas. Sem `--apply` só conta o que falta; com `--apply` copia o banco antes. Retomável: se o Open-Meteo recusar por limite diário, para e continua de onde parou na próxima execução (`--limit N` processa no máximo N regiões).
 * `scripts/build_inmet_normals.py`: Regera `app/data/inmet_normals_1991_2020.json` a partir das planilhas oficiais do INMET (só é preciso se o INMET corrigir as planilhas).
 * `scripts/validate_era5_bdmep.py`: Compara o histórico mensal ERA5 do banco com as estações automáticas do INMET (BDMEP, zips anuais de ~90 MB sem token) e gera um relatório em Markdown; só lê o banco (ex.: `--years 2015-2025 --out relatorio.md`).
 * `scripts/cleanup_all_regions.py`: Limpeza e reestruturação atômica das regiões.

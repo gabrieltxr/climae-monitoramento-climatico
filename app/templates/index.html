@@ -1484,7 +1484,8 @@
             <div class="kpi-box">
                 <div class="label">Temperatura Média Histórica</div>
                 <div class="value" id="climNormTemp">-- °C</div>
-                <small id="climNormTempRange" style="color: var(--text-muted);">Mín: -- / Máx: --</small>
+                <small id="climNormTempMeans" style="color: var(--text-muted); display: block;">Médias diárias: mín -- / máx --</small>
+                <small id="climNormTempRange" style="color: var(--text-muted); display: block;">Extremos do mês (média dos anos): mín -- / máx --</small>
             </div>
 
             <div class="kpi-box">
@@ -3372,8 +3373,13 @@
             }
 
             document.getElementById('climNormTemp').textContent = norm ? `${norm.avg_temp_c} °C` : '-- °C';
+            // max/min_temp_c = média dos extremos do mês; mean_* = média das máximas/mínimas diárias.
+            const fmtC = (x) => (x === null || x === undefined) ? 'sem dado' : `${x}°C`;
+            document.getElementById('climNormTempMeans').textContent = norm
+                ? `Médias diárias: mín ${fmtC(norm.mean_min_temp_c)} / máx ${fmtC(norm.mean_max_temp_c)}`
+                : '--';
             document.getElementById('climNormTempRange').textContent = norm
-                ? `Mín abs: ${norm.min_temp_c}°C / Máx abs: ${norm.max_temp_c}°C`
+                ? `Extremos do mês (média dos anos): mín ${fmtC(norm.min_temp_c)} / máx ${fmtC(norm.max_temp_c)}`
                 : '--';
 
             // Normal oficial INMET (mínimo funcional; visual fica para a reconstrução do frontend)

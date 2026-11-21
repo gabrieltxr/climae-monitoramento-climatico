@@ -1603,16 +1603,23 @@ def test_legacy_create_all_database_is_stamped_and_upgraded(tmp_path):
     app = _file_db_app(tmp_path, "legado.db")
     with app.app_context():
         later_tables = {"station_observations", "official_warnings", "official_forecasts"}  # migrations 0002–0004
+        # 0005 só adiciona colunas: o banco legado é criado sem elas, como era antes.
+        later_columns = {"mean_max_temp_c", "mean_min_temp_c"}
         legacy_tables = [t for name, t in db.metadata.tables.items() if name not in later_tables]
         db.metadata.create_all(db.engine, tables=legacy_tables)
+        with db.engine.begin() as conn:
+            for col in sorted(later_columns):
+                conn.execute(text(f"ALTER TABLE monthly_climate_summaries DROP COLUMN {col}"))
         db.session.add(Region(municipality="Pelotas", name="Pelotas (Centro)", latitude=-31.7, longitude=-52.3))
         db.session.commit()
 
         assert ensure_schema() == "legado_marcado"
         assert Region.query.count() == 1
         assert later_tables <= set(inspect(db.engine).get_table_names())
+        cols = {c["name"] for c in inspect(db.engine).get_columns("monthly_climate_summaries")}
+        assert later_columns <= cols
         with db.engine.connect() as conn:
-            assert conn.execute(text("select version_num from alembic_version")).scalar() == "0004_official_forecasts"
+            assert conn.execute(text("select version_num from alembic_version")).scalar() == "0005_daily_temp_means"
         assert _schema_diffs() == []
         db.session.remove()
         db.engine.dispose()
@@ -2156,3 +2163,187 @@ def test_bdmep_collect_and_report_from_zip(tmp_path):
     assert "## A802 Rio Grande" in report and "Rio Grande (Centro) (3.9 km)" in report
     assert "| Chuva do mês (mm) | 1 | -72.0 | 72.0 | 372 | 300 |" in report
     assert "| jan | +1.0 |" in report
+
+
+# --- Média das máximas/mínimas diárias (migration 0005) ---
+
+def test_mean_of_complete_days_requires_every_day():
+    from app.services.monthly_consolidation import mean_of_complete_days
+    assert mean_of_complete_days([20.0, 22.0, 24.0], 3) == 22.0
+    assert mean_of_complete_days([20.0, None, 24.0], 3) is None
+    assert mean_of_complete_days([20.0, 22.0], 3) is None
+    assert mean_of_complete_days(None, 3) is None
+
+
+def test_consolidation_saves_daily_means_and_normal(client, monkeypatch):
+    from app.models import MonthlyClimateSummary
+    from app.services import monthly_consolidation as mc
+    monkeypatch.setattr(mc, "fetch_month_daily", _fake_era5(incomplete_months=()))
+    with client.application.app_context():
+        mc.consolidate_month(2026, 10, reference_date=datetime(2026, 11, 7, tzinfo=timezone.utc))
+        rec = MonthlyClimateSummary.query.filter_by(year=2026, month=10).first()
+        assert (rec.mean_max_temp_c, rec.mean_min_temp_c) == (24.0, 12.0)
+        normal = MonthlyClimateSummary.query.filter_by(year=0, month=10).first()
+        assert (normal.mean_max_temp_c, normal.mean_min_temp_c) == (24.0, 12.0)
+
+
+def test_seed_saves_daily_means_only_for_complete_months(client):
+    from app.models import Region, MonthlyClimateSummary
+    from scripts.seed_monthly_climate import aggregate_and_save_region
+    dates = [f"2026-08-{d:02d}" for d in range(1, 32)] + [f"2026-09-{d:02d}" for d in range(1, 31)]
+    n = len(dates)
+    t_max = [20.0 if i % 2 == 0 else 22.0 for i in range(n)]   # alternados; setembro (30 dias) tem média 21
+    t_min = [10.0] * n
+    t_min[40] = None                                          # um dia de setembro sem mínima
+    daily = {"time": dates, "temperature_2m_mean": [15.0] * n, "temperature_2m_max": t_max,
+             "temperature_2m_min": t_min, "precipitation_sum": [1.0] * n, "wind_speed_10m_max": [20.0] * n}
+    with client.application.app_context():
+        region = Region.query.first()
+        aggregate_and_save_region(region, daily)
+        sep = MonthlyClimateSummary.query.filter_by(region_id=region.id, year=2026, month=9).one()
+        assert sep.mean_max_temp_c == 21.0 and sep.mean_min_temp_c is None
+        aug = MonthlyClimateSummary.query.filter_by(region_id=region.id, year=2026, month=8).one()
+        assert aug.mean_min_temp_c == 10.0
+        normal_sep = MonthlyClimateSummary.query.filter_by(region_id=region.id, year=0, month=9).one()
+        assert normal_sep.mean_max_temp_c == 21.0 and normal_sep.mean_min_temp_c is None
+
+
+def _daily_temps_fake(calls, missing_dates=()):
+    from datetime import date, timedelta
+    def fake(lat, lon, start, end):
+        calls.append((start, end))
+        d, last = date.fromisoformat(start), date.fromisoformat(end)
+        times, tmax, tmin = [], [], []
+        while d <= last:
+            times.append(d.isoformat())
+            tmax.append(None if d.isoformat() in missing_dates else 25.0)
+            tmin.append(11.0)
+            d += timedelta(days=1)
+        return {"time": times, "temperature_2m_max": tmax, "temperature_2m_min": tmin}
+    return fake
+
+
+def test_backfill_fills_only_new_columns_and_resumes(client, monkeypatch):
+    from app.models import Region, MonthlyClimateSummary
+    from scripts import backfill_daily_temp_means as bf
+    calls = []
+    monkeypatch.setattr(bf, "fetch_daily_temps", _daily_temps_fake(calls, missing_dates=("2025-02-10",)))
+    with client.application.app_context():
+        rid = Region.query.first().id
+        db.session.add_all([
+            MonthlyClimateSummary(region_id=rid, year=2025, month=1, avg_temp_c=23.0, max_temp_c=34.0,
+                                  min_temp_c=14.0, total_rain_mm=90.0, rainy_days=7, max_wind_kmh=50.0),
+            MonthlyClimateSummary(region_id=rid, year=2025, month=2, avg_temp_c=22.0, max_temp_c=33.0,
+                                  min_temp_c=13.0, total_rain_mm=80.0, rainy_days=6),
+            MonthlyClimateSummary(region_id=rid, year=0, month=1, avg_temp_c=23.0, max_temp_c=34.0,
+                                  min_temp_c=14.0, total_rain_mm=90.0, rainy_days=7),
+        ])
+        db.session.commit()
+
+        result = bf.run_backfill(pause_sec=0)
+        assert calls == [("2025-01-01", "2025-02-28")]
+        assert (result["filled"], result["missing"]) == (1, 1)
+        jan = MonthlyClimateSummary.query.filter_by(year=2025, month=1).one()
+        assert (jan.mean_max_temp_c, jan.mean_min_temp_c) == (25.0, 11.0)
+        # Colunas antigas intactas.
+        assert (jan.avg_temp_c, jan.max_temp_c, jan.min_temp_c, jan.total_rain_mm, jan.rainy_days,
+                jan.max_wind_kmh) == (23.0, 34.0, 14.0, 90.0, 7, 50.0)
+        feb = MonthlyClimateSummary.query.filter_by(year=2025, month=2).one()
+        assert feb.mean_max_temp_c is None and feb.mean_min_temp_c == 11.0   # dia sem máxima
+        normal = MonthlyClimateSummary.query.filter_by(year=0, month=1).one()
+        assert (normal.mean_max_temp_c, normal.mean_min_temp_c) == (25.0, 11.0)
+        assert (normal.max_temp_c, normal.min_temp_c, normal.total_rain_mm) == (34.0, 14.0, 90.0)
+
+        # Nova execução: só o mês que falta é pedido.
+        calls.clear()
+        monkeypatch.setattr(bf, "fetch_daily_temps", _daily_temps_fake(calls))
+        bf.run_backfill(pause_sec=0)
+        assert calls == [("2025-02-01", "2025-02-28")]
+        assert MonthlyClimateSummary.query.filter_by(year=2025, month=2).one().mean_max_temp_c == 25.0
+        calls.clear()
+        assert bf.run_backfill(pause_sec=0)["regions"] == 0 and calls == []
+
+
+def test_backfill_stops_on_api_limit_without_writing(client, monkeypatch):
+    from app.models import Region, MonthlyClimateSummary
+    from scripts import backfill_daily_temp_means as bf
+
+    def limited(*a, **k):
+        raise bf.ApiLimitReached("Daily API request limit exceeded")
+    monkeypatch.setattr(bf, "fetch_daily_temps", limited)
+    with client.application.app_context():
+        rid = Region.query.first().id
+        db.session.add(MonthlyClimateSummary(region_id=rid, year=2025, month=1, total_rain_mm=1.0))
+        db.session.commit()
+        result = bf.run_backfill(pause_sec=0)
+        assert result["stopped"].startswith("limite da API") and result["regions"] == 0
+        assert MonthlyClimateSummary.query.filter_by(year=2025, month=1).one().mean_max_temp_c is None
+
+
+def test_backfill_api_limit_detection(monkeypatch):
+    from scripts import backfill_daily_temp_means as bf
+
+    class Resp:
+        status_code = 429
+        text = ""
+
+        def __init__(self, reason):
+            self._reason = reason
+
+        def json(self):
+            return {"error": True, "reason": self._reason}
+    answers = [Resp("Minutely API request limit exceeded. Please try again in one minute."),
+               Resp("Daily API request limit exceeded. Please try again tomorrow.")]
+    monkeypatch.setattr(bf.requests, "get", lambda *a, **k: answers.pop(0))
+    monkeypatch.setattr(bf.time, "sleep", lambda s: None)
+    with pytest.raises(bf.ApiLimitReached):
+        bf.fetch_daily_temps(-32.0, -52.1, "2025-01-01", "2025-01-31")
+    assert answers == []
+
+
+def test_backfill_simulation_writes_nothing(client, monkeypatch, capsys):
+    from app.models import Region, MonthlyClimateSummary
+    from scripts import backfill_daily_temp_means as bf
+    monkeypatch.setattr(bf, "fetch_daily_temps", lambda *a, **k: pytest.fail("simulação não baixa nada"))
+    with client.application.app_context():
+        rid = Region.query.first().id
+        db.session.add(MonthlyClimateSummary(region_id=rid, year=2025, month=1, total_rain_mm=1.0))
+        db.session.commit()
+    assert bf.main([], app=client.application) == 0
+    assert "1 meses em 1 regiões" in capsys.readouterr().out
+
+
+def test_climate_history_exposes_daily_means_and_labels(client):
+    from app.models import Region, MonthlyClimateSummary
+    with client.application.app_context():
+        rid = Region.query.first().id
+        db.session.add(MonthlyClimateSummary(region_id=rid, year=0, month=7, avg_temp_c=12.5, max_temp_c=25.2,
+                                             min_temp_c=3.0, mean_max_temp_c=17.4, mean_min_temp_c=8.6,
+                                             total_rain_mm=120.0, rainy_days=12))
+        db.session.commit()
+    data = client.get(f"/api/climate-history/{rid}?month=7&year=2030").get_json()
+    assert data["month_normal"]["mean_max_temp_c"] == 17.4
+    assert "médias diárias: mín 8.6 °C / máx 17.4 °C" in data["outlook_text"]
+    assert "extremos do mês, média dos anos: mín 3.0 °C / máx 25.2 °C" in data["outlook_text"]
+
+
+def test_climate_panel_labels_extremes_as_mean_of_years():
+    from pathlib import Path
+    template = (Path(__file__).resolve().parent.parent / "app" / "templates" / "index.html").read_text(encoding="utf-8")
+    assert "Mín abs:" not in template
+    assert "Extremos do mês (média dos anos)" in template and "climNormTempMeans" in template
+
+
+def test_bdmep_daily_means_need_enough_hours_and_days():
+    from datetime import timedelta
+    mod = _validate_script()
+    start = datetime(2025, 2, 1, 0)
+    hours = []
+    for h in range(28 * 24):
+        t = start + timedelta(hours=h)
+        hours.append((t, 0.0, 20.0, 30.0 if t.hour == 15 else 20.0, 10.0 if t.hour == 5 else 15.0))
+    feb = mod.monthly_summary(hours)[(2025, 2)]
+    assert feb["mean_max_temp_c"] == 30.0 and feb["mean_min_temp_c"] == 10.0
+    # Sem 4 dias (~86% dos dias): não entra.
+    short = [h for h in hours if not 3 <= h[0].day <= 6]
+    assert mod.monthly_summary(short)[(2025, 2)]["mean_max_temp_c"] is None

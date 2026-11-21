@@ -68,6 +68,46 @@ def is_daily_series_complete(daily: dict, expected_days: int) -> bool:
     return True
 
 
+def mean_of_complete_days(values: list, expected_days: int) -> float | None:
+    """Média dos valores diários do mês, só se todos os `expected_days` dias vierem
+    preenchidos (sem null); com falha, None — média de mês parcial puxa para os dias que vieram."""
+    if values is None or len(values) < expected_days:
+        return None
+    days = values[:expected_days]
+    if any(v is None for v in days):
+        return None
+    return round(sum(float(v) for v in days) / expected_days, 1)
+
+
+def _mean_or_none(values: list) -> float | None:
+    vals = [v for v in values if v is not None]
+    return round(sum(vals) / len(vals), 1) if vals else None
+
+
+def recalculate_daily_mean_normals(region_id: int, now_utc: datetime = None, months=range(1, 13)) -> int:
+    """
+    Atualiza na normal (year = 0) só a média das máximas e das mínimas diárias, a partir
+    dos anos que já têm o valor. As demais colunas da normal não são tocadas. Sem normal
+    gravada para o mês, não cria uma. Retorna quantas normais foram atualizadas.
+    """
+    now_utc = now_utc or datetime.now(timezone.utc)
+    updated = 0
+    for month in months:
+        normal = MonthlyClimateSummary.query.filter_by(region_id=region_id, year=0, month=month).first()
+        if not normal:
+            continue
+        years = MonthlyClimateSummary.query.filter(
+            MonthlyClimateSummary.region_id == region_id,
+            MonthlyClimateSummary.month == month,
+            MonthlyClimateSummary.year > 0,
+        ).all()
+        normal.mean_max_temp_c = _mean_or_none([y.mean_max_temp_c for y in years])
+        normal.mean_min_temp_c = _mean_or_none([y.mean_min_temp_c for y in years])
+        normal.updated_at = now_utc
+        updated += 1
+    return updated
+
+
 def is_month_consolidated(year: int, month: int) -> bool:
     """Verifica se o mês/ano especificado já está consolidado nas regiões cadastradas."""
     total_regions = Region.query.count()
@@ -142,6 +182,8 @@ def recalculate_normal_for_month(region_id: int, month: int, now_utc: datetime):
     normal.total_rain_mm = round(sum(rains) / len(rains), 1) if rains else 0.0
     normal.rainy_days = int(round(sum(rainy_days) / len(rainy_days))) if rainy_days else 0
     normal.max_wind_kmh = round(sum(winds) / len(winds), 1) if winds else None
+    normal.mean_max_temp_c = _mean_or_none([y.mean_max_temp_c for y in all_years])
+    normal.mean_min_temp_c = _mean_or_none([y.mean_min_temp_c for y in all_years])
     normal.updated_at = now_utc
 
 
@@ -266,6 +308,8 @@ def consolidate_month(target_year: int, target_month: int, force: bool = False, 
         summary.total_rain_mm = tot_rain
         summary.rainy_days = r_days
         summary.max_wind_kmh = pk_wind
+        summary.mean_max_temp_c = mean_of_complete_days(daily.get("temperature_2m_max"), last_day)
+        summary.mean_min_temp_c = mean_of_complete_days(daily.get("temperature_2m_min"), last_day)
         summary.source = f"Open-Meteo ERA5 Reanalysis ({target_month:02d}/{target_year})"
         summary.updated_at = now_utc
 
