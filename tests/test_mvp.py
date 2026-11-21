@@ -2052,3 +2052,107 @@ def test_climate_history_includes_inmet_normal(client):
     data = client.get(f"/api/climate-history/{region_id}?month=1&year=2025").get_json()
     assert data["inmet_normal"]["station_code"] == "83995"
     assert data["inmet_normal"]["total_rain_mm"] == 97.3
+
+
+def _validate_script():
+    import importlib.util
+    from pathlib import Path
+    path = Path(__file__).resolve().parents[1] / "scripts" / "validate_era5_bdmep.py"
+    spec = importlib.util.spec_from_file_location("validate_era5_bdmep", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _bdmep_csv(code, lat, lon, start, hours, rain=lambda t: 0, temp=lambda t: 20.0, skip=lambda t: False):
+    """CSV horário no formato do BDMEP (latin-1, ';', vírgula decimal, hora UTC)."""
+    from datetime import timedelta
+    head = [
+        "REGIAO:;S", "UF:;RS", "ESTACAO:;TESTE", f"CODIGO (WMO):;{code}",
+        f"LATITUDE:;{str(lat).replace('.', ',')}", f"LONGITUDE:;{str(lon).replace('.', ',')}",
+        "ALTITUDE:;10", "DATA DE FUNDACAO:;01/01/01",
+        "Data;Hora UTC;PRECIPITAÇÃO TOTAL, HORÁRIO (mm);P;PMAX;PMIN;RAD;TEMPERATURA DO AR (°C);ORV;TMAX;TMIN;"
+        "OMAX;OMIN;UMAX;UMIN;UR;DIR;RAJ;VEL;",
+    ]
+    rows = []
+    for i in range(hours):
+        t = start + timedelta(hours=i)
+        if skip(t):
+            r, tt = "", ""
+        else:
+            r, tt = str(rain(t)).replace(".", ","), str(temp(t)).replace(".", ",")
+        rows.append(f"{t:%Y/%m/%d};{t:%H%M} UTC;{r};1010;1010;1010;;{tt};15;{tt};{tt};;;;;80;90;5;2;")
+    return "\n".join(head + rows)
+
+
+def test_bdmep_monthly_summary_local_day_and_completeness():
+    from datetime import datetime
+    mod = _validate_script()
+    # fev/2025 em UTC-3 = 01/02 03:00 UTC até 01/03 02:00 UTC; começa 1 dia antes p/ cobrir tudo.
+    start = datetime(2025, 1, 31, 0)
+    rain = lambda t: 5.0 if (t.day, t.hour) in ((10, 12), (1, 1)) and t.month in (2, 3) else 0.0
+    temp = lambda t: 30.0 if (t.month, t.day, t.hour) == (2, 14, 18) else (-1.0 if (t.month, t.day, t.hour) == (2, 15, 8) else 20.0)
+    parsed = mod.parse_station_csv(_bdmep_csv("A802", -32.0, -52.1, start, 24 * 31, rain, temp))
+    assert parsed["code"] == "A802" and parsed["latitude"] == -32.0
+    feb = mod.monthly_summary(parsed["hours"])[(2025, 2)]
+    # 01/03 01:00 UTC = 28/02 22:00 local: a chuva conta em fevereiro.
+    assert feb["total_rain_mm"] == 10.0 and feb["rainy_days"] == 2
+    assert feb["max_temp_c"] == 30.0 and feb["min_temp_c"] == -1.0
+    assert feb["temp_completeness"] == 1.0
+
+    # Sem 4 dias de dados (~86% das horas): o mês não entra.
+    gap = lambda t: t.month == 2 and 3 <= t.day <= 6
+    parsed = mod.parse_station_csv(_bdmep_csv("A802", -32.0, -52.1, start, 24 * 31, rain, temp, skip=gap))
+    feb = mod.monthly_summary(parsed["hours"])[(2025, 2)]
+    assert feb["total_rain_mm"] is None and feb["rainy_days"] is None and feb["avg_temp_c"] is None
+
+
+def test_bdmep_compare_flags_suspect_rain_and_pairs_region():
+    mod = _validate_script()
+    station = {
+        (2025, 1): {"total_rain_mm": 100.0, "rainy_days": 8, "avg_temp_c": 23.0, "max_temp_c": 33.0, "min_temp_c": 14.0},
+        (2025, 3): {"total_rain_mm": 1.0, "rainy_days": 0, "avg_temp_c": 22.0, "max_temp_c": 35.0, "min_temp_c": 12.0},
+        (2025, 4): {"total_rain_mm": None, "rainy_days": None, "avg_temp_c": None, "max_temp_c": None, "min_temp_c": None},
+    }
+    era5 = {
+        (2025, 1): {"total_rain_mm": 80.0, "rainy_days": 12, "avg_temp_c": 23.5, "max_temp_c": 32.0, "min_temp_c": 15.0},
+        (2025, 3): {"total_rain_mm": 87.0, "rainy_days": 13, "avg_temp_c": 22.4, "max_temp_c": 34.0, "min_temp_c": 13.0},
+        (2025, 4): {"total_rain_mm": 120.0, "rainy_days": 9, "avg_temp_c": 18.0, "max_temp_c": 27.0, "min_temp_c": 7.0},
+    }
+    pairs, suspects = mod.compare(station, era5)
+    assert suspects == [(2025, 3, 1.0, 87.0)]
+    rain_pairs = [p for p in pairs if p[0] == "total_rain_mm"]
+    assert rain_pairs == [("total_rain_mm", 2025, 1, 100.0, 80.0)]
+    st = mod.stats(pairs)
+    assert st["avg_temp_c"][0] == 2 and round(st["avg_temp_c"][1], 2) == 0.45
+    assert st["rainy_days"][1] == 4
+    assert not mod.is_suspect_rain(5.0, 30.0)  # ERA5 baixo demais p/ julgar
+
+    regions = [{"id": 1, "name": "Perto", "latitude": -32.05, "longitude": -52.1},
+               {"id": 2, "name": "Longe", "latitude": -33.5, "longitude": -53.4}]
+    assert mod.nearest_region(regions, -32.0, -52.1)[0]["id"] == 1
+    assert mod.nearest_region(regions, -30.0, -51.0) is None
+
+
+def test_bdmep_collect_and_report_from_zip(tmp_path):
+    import io, zipfile
+    from datetime import datetime
+    mod = _validate_script()
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr("2025/INMET_S_RS_A802_RIO GRANDE_01-01-2025_A_31-12-2025.CSV",
+                    _bdmep_csv("A802", -32.0, -52.1, datetime(2025, 1, 1, 3), 24 * 31, rain=lambda t: 0.5).encode("latin-1"))
+        zf.writestr("2025/INMET_S_RS_A801_PORTO ALEGRE_01-01-2025_A_31-12-2025.CSV", "ignorada")
+    (tmp_path / "2025.zip").write_bytes(buf.getvalue())
+
+    stations = mod.collect_station_months([2025], cache_dir=str(tmp_path))
+    assert list(stations) == ["A802"]
+    jan = stations["A802"]["months"][(2025, 1)]
+    assert jan["total_rain_mm"] == 372.0 and jan["rainy_days"] == 31
+
+    regions = [{"id": 7, "name": "Rio Grande (Centro)", "latitude": -32.035, "longitude": -52.0986}]
+    era5 = {7: {(2025, 1): {"total_rain_mm": 300.0, "rainy_days": 20, "avg_temp_c": 21.0, "max_temp_c": 22.0, "min_temp_c": 19.0}}}
+    report = mod.render_report(stations, regions, era5, [2025])
+    assert "## A802 Rio Grande" in report and "Rio Grande (Centro) (3.9 km)" in report
+    assert "| Chuva do mês (mm) | 1 | -72.0 | 72.0 | 372 | 300 |" in report
+    assert "| jan | +1.0 |" in report

@@ -179,6 +179,7 @@ Acesse a aplicação no navegador em: **`http://127.0.0.1:5000`**
 * `scripts/sync_climate_history.py`: Audita a integridade do banco e sincroniza a climatologia ERA5 das 56 regiões.
 * `scripts/seed_monthly_climate.py`: Rotina avançada de carga direta da API ERA5 Open-Meteo.
 * `scripts/build_inmet_normals.py`: Regera `app/data/inmet_normals_1991_2020.json` a partir das planilhas oficiais do INMET (só é preciso se o INMET corrigir as planilhas).
+* `scripts/validate_era5_bdmep.py`: Compara o histórico mensal ERA5 do banco com as estações automáticas do INMET (BDMEP, zips anuais de ~90 MB sem token) e gera um relatório em Markdown; só lê o banco (ex.: `--years 2015-2025 --out relatorio.md`).
 * `scripts/cleanup_all_regions.py`: Limpeza e reestruturação atômica das regiões.
 
 ### Esquema do banco (migrations)
