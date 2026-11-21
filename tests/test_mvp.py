@@ -1955,3 +1955,100 @@ def test_forecast_interval_env(monkeypatch):
     for bad in ("abc", "0", "-1"):
         monkeypatch.setenv("INMET_PREVISAO_HOURS", bad)
         assert get_interval_hours() == 3
+
+
+# --- Normais oficiais INMET 1991–2020 ---
+
+def _xlsx(rows):
+    """Planilha .xlsx mínima (texto inline) para testar o leitor sem dependências."""
+    import io, zipfile
+    from xml.sax.saxutils import escape
+    def col(i):
+        s = ""
+        i += 1
+        while i:
+            i, r = divmod(i - 1, 26)
+            s = chr(65 + r) + s
+        return s
+    body = "".join(
+        f'<row r="{r + 1}">' + "".join(
+            f'<c r="{col(c)}{r + 1}" t="inlineStr"><is><t>{escape(str(v))}</t></is></c>' for c, v in enumerate(row)
+        ) + "</row>" for r, row in enumerate(rows))
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as z:
+        z.writestr("xl/worksheets/sheet1.xml",
+                   '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+                   f"<sheetData>{body}</sheetData></worksheet>")
+    return buf.getvalue()
+
+
+def _build_script():
+    import importlib.util
+    from pathlib import Path
+    path = Path(__file__).resolve().parents[1] / "scripts" / "build_inmet_normals.py"
+    spec = importlib.util.spec_from_file_location("build_inmet_normals", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_build_inmet_normals_parses_sheets_and_gaps():
+    mod = _build_script()
+    months = [str(10 + m) for m in range(12)]
+    header = [["Normal Climatológica do Brasil 1991-2020"], ["Código", "Nome", "UF"] + ["Mês"] * 12 + ["Ano"]]
+    def sheet(value_rows):
+        return _xlsx(header + value_rows)
+    full = lambda code: [code, "X", "RS"] + months + ["999"]
+    gap = lambda code: [code, "X", "RS"] + ["-"] * 12 + ["-"]
+    sheets = {
+        "ESTAÇÕES": _xlsx([["Nº", "Código", "Nome", "UF", "Lat", "Lon"],
+                           ["1", "83985", "PELOTAS", "RS", "-31.78333", "-52.41666"],
+                           ["2", "83995", "RIO GRANDE", "RS", "-32.0788", "-52.1677"],
+                           ["3", "83997", "SANTA VITORIA DO PALMAR", "RS", "-33.5316", "-53.3502"],
+                           ["4", "83967", "PORTO ALEGRE", "RS", "-30.05", "-51.17"]]),
+        "PREC": sheet([full("83985"), full("83995"), full("83997"), full("83967")]),
+        "PRENDIAS1": sheet([full("83985"), full("83997")]),          # Rio Grande ausente
+        "TMEDSECA": sheet([full("83985"), gap("83995"), full("83997")]),
+        "TMAX": sheet([full("83985"), full("83997")]),
+        "TMIN": sheet([full("83985"), full("83995"), full("83997")]),
+    }
+    doc = mod.build(sheets)
+    assert [s["code"] for s in doc["stations"]] == ["83985", "83995", "83997"]
+    pelotas, rio_grande, svp = doc["stations"]
+    assert svp["name"] == "Santa Vitória do Palmar" and pelotas["latitude"] == -31.7833
+    assert pelotas["months"][0] == {"month": 1, "total_rain_mm": 10.0, "rainy_days": 10, "avg_temp_c": 10.0,
+                                    "mean_max_temp_c": 10.0, "mean_min_temp_c": 10.0}
+    assert rio_grande["months"][11]["rainy_days"] is None and rio_grande["months"][11]["avg_temp_c"] is None
+    assert rio_grande["months"][11]["total_rain_mm"] == 21.0
+
+
+def test_inmet_normals_json_matches_published_values():
+    from app.services.inmet_normals import load_normals
+    data = load_normals()
+    assert data["period"] == "1991-2020"
+    by_code = {s["code"]: s for s in data["stations"]}
+    jan = by_code["83985"]["months"][0]
+    assert (jan["total_rain_mm"], jan["rainy_days"], jan["avg_temp_c"]) == (115.9, 9, 23.5)
+    assert by_code["83985"]["months"][6]["mean_max_temp_c"] == 17.8
+    assert by_code["83995"]["months"][7]["avg_temp_c"] is None          # falha publicada (agosto)
+    assert all(len(s["months"]) == 12 for s in data["stations"])
+
+
+def test_region_inmet_normal_nearest_station_and_radius(monkeypatch):
+    from app.services.inmet_normals import get_region_inmet_normal
+    monkeypatch.delenv("INMET_NORMALS_MAX_DISTANCE_KM", raising=False)
+    chui = Region(municipality="Chuí", name="Chuí (Centro)", latitude=-33.6886, longitude=-53.4569)
+    normal = get_region_inmet_normal(chui, 7)
+    assert normal["station_code"] == "83997" and 15 < normal["distance_km"] < 25
+    assert normal["month"] == 7 and normal["period"] == "1991-2020"
+    jaguarao = Region(municipality="Jaguarão", name="Jaguarão (Centro)", latitude=-32.5604, longitude=-53.3760)
+    assert get_region_inmet_normal(jaguarao, 7) is None
+    monkeypatch.setenv("INMET_NORMALS_MAX_DISTANCE_KM", "200")
+    assert get_region_inmet_normal(jaguarao, 7) is not None
+
+
+def test_climate_history_includes_inmet_normal(client):
+    region_id = Region.query.first().id  # Rio Grande (Centro)
+    data = client.get(f"/api/climate-history/{region_id}?month=1&year=2025").get_json()
+    assert data["inmet_normal"]["station_code"] == "83995"
+    assert data["inmet_normal"]["total_rain_mm"] == 97.3

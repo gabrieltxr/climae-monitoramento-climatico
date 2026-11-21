@@ -1493,6 +1493,8 @@
                 <small id="climExtremesDetail" style="color: var(--text-muted);">Mais seco: --</small>
             </div>
         </div>
+        <!-- Normal oficial INMET 1991–2020 da estação mais próxima (só aparece quando há estação no raio) -->
+        <div id="climInmetNormal" class="meta-info" style="display:none; margin-top:8px;"></div>
 
         <!-- 2 Gráficos Comparativos Lado a Lado -->
         <div class="climate-charts-grid">
@@ -3373,6 +3375,22 @@
             document.getElementById('climNormTempRange').textContent = norm
                 ? `Mín abs: ${norm.min_temp_c}°C / Máx abs: ${norm.max_temp_c}°C`
                 : '--';
+
+            // Normal oficial INMET (mínimo funcional; visual fica para a reconstrução do frontend)
+            const inmetEl = document.getElementById('climInmetNormal');
+            const inm = data.inmet_normal;
+            if (inm) {
+                const v = (x, unit) => (x === null || x === undefined) ? 'sem dado' : `${x} ${unit}`;
+                inmetEl.textContent =
+                    `📊 Normal oficial INMET ${inm.period} — estação ${inm.station_name} (${inm.distance_km} km): ` +
+                    `chuva ${v(inm.total_rain_mm, 'mm')} • dias com chuva ≥1 mm ${v(inm.rainy_days, '')} • ` +
+                    `média ${v(inm.avg_temp_c, '°C')} • média das máximas ${v(inm.mean_max_temp_c, '°C')} • ` +
+                    `média das mínimas ${v(inm.mean_min_temp_c, '°C')}`;
+                inmetEl.style.display = '';
+            } else {
+                inmetEl.textContent = '';
+                inmetEl.style.display = 'none';
+            }
 
             if (ext.wettest) {
                 document.getElementById('climWettestYear').textContent = `Recorde: ${ext.wettest.year} (${ext.wettest.total_rain_mm} mm)`;

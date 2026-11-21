@@ -8,6 +8,7 @@ from app.collectors.traffic_collector import get_traffic_panel_data, update_high
 from app.collectors.inmet import get_region_station_summary
 from app.collectors.inmet_avisos import get_active_warnings, get_region_warnings
 from app.collectors.inmet_previsao import get_region_forecast
+from app.services.inmet_normals import get_region_inmet_normal
 
 main_bp = Blueprint('main', __name__)
 
@@ -467,6 +468,8 @@ def api_climate_history(region_id: int):
         "selected_month": selected_month,
         "selected_year": selected_year,
         "month_normal": month_normal,
+        # Normal oficial INMET 1991–2020 da estação mais próxima (só referência; anomalias usam a ERA5).
+        "inmet_normal": get_region_inmet_normal(region, selected_month),
         "selected_record": selected_record,
         "rain_anomaly_pct": rain_anomaly_pct,
         "temp_anomaly_c": temp_anomaly_c,
