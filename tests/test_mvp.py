@@ -1408,7 +1408,9 @@ def test_weather_summary_batches_queries_and_picks_latest(client):
         db.session.add_all([
             RiskAssessment(region_id=r.id, assessed_at=hour - timedelta(hours=3), risk_level="Alto",
                            score=60, method_version="t"),
-            RiskAssessment(region_id=r.id, assessed_at=hour - timedelta(minutes=10), risk_level="Moderado",
+            RiskAssessment(region_id=r.id,
+                           assessed_at=datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(minutes=10),
+                           risk_level="Moderado",
                            score=30 + idx, method_version="t"),
         ])
     db.session.commit()
@@ -1437,7 +1439,37 @@ def test_weather_summary_batches_queries_and_picks_latest(client):
         assert row["observed_at"].endswith("+00:00")
     blank = by_id[empty.id]
     assert blank["temperature_c"] is None and blank["observed_at"] is None
-    assert blank["rain_next_24h_mm"] == 0 and blank["risk_level"] == "Baixo"
+    assert blank["rain_next_24h_mm"] == 0
+    # Sem avaliação = sem dado, nunca "Baixo"/0.
+    assert blank["risk_level"] is None and blank["risk_score"] is None
+    assert blank["risk_assessed_at"] is None
+
+
+def test_weather_summary_hides_stale_risk(client):
+    from datetime import timedelta
+    from app.models import RiskAssessment
+    from app.routes.main import RISK_MAX_AGE_MINUTES
+    region = Region.query.first()
+    old = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(minutes=RISK_MAX_AGE_MINUTES + 5)
+    db.session.add(RiskAssessment(region_id=region.id, assessed_at=old, risk_level="Alto",
+                                  score=61, method_version="t"))
+    db.session.commit()
+
+    row = next(r for r in client.get("/api/weather-summary?format=list").get_json()
+               if r["region_id"] == region.id)
+    # Avaliação velha não aparece como atual; a data fica para quem quiser mostrar.
+    assert row["risk_level"] is None and row["risk_score"] is None
+    assert row["risk_assessed_at"].startswith(old.isoformat()[:16])
+
+
+def test_map_risk_colors_cover_engine_levels():
+    # O mapa já esperou "Médio" (o motor gera "Moderado") e comparava o texto exato,
+    # deixando Moderado, "(Provisório)" e Inconclusivo verdes.
+    from pathlib import Path
+    html = (Path(__file__).resolve().parents[1] / "app" / "templates" / "index.html").read_text(encoding="utf-8")
+    assert "'Médio'" not in html
+    assert "function riskBaseLevel" in html
+    assert "startsWith('moderado')" in html
 
 
 # --- GET /api/risk não grava e não devolve avaliação velha ---
@@ -1570,7 +1602,7 @@ def test_legacy_create_all_database_is_stamped_and_upgraded(tmp_path):
     from app.db_schema import ensure_schema
     app = _file_db_app(tmp_path, "legado.db")
     with app.app_context():
-        later_tables = {"station_observations", "official_warnings"}  # criadas pelas migrations 0002/0003
+        later_tables = {"station_observations", "official_warnings", "official_forecasts"}  # migrations 0002–0004
         legacy_tables = [t for name, t in db.metadata.tables.items() if name not in later_tables]
         db.metadata.create_all(db.engine, tables=legacy_tables)
         db.session.add(Region(municipality="Pelotas", name="Pelotas (Centro)", latitude=-31.7, longitude=-52.3))
@@ -1580,7 +1612,7 @@ def test_legacy_create_all_database_is_stamped_and_upgraded(tmp_path):
         assert Region.query.count() == 1
         assert later_tables <= set(inspect(db.engine).get_table_names())
         with db.engine.connect() as conn:
-            assert conn.execute(text("select version_num from alembic_version")).scalar() == "0003_official_warnings"
+            assert conn.execute(text("select version_num from alembic_version")).scalar() == "0004_official_forecasts"
         assert _schema_diffs() == []
         db.session.remove()
         db.engine.dispose()
@@ -1817,3 +1849,310 @@ def test_full_refresh_minutes_from_env(monkeypatch):
     for bad in ("abc", "0", "-5"):
         monkeypatch.setenv("INMET_AVISOS_FULL_REFRESH_MINUTES", bad)
         assert get_full_refresh_minutes() == 60
+
+
+# --- Previsão oficial do INMET por município ---
+
+def _turno(resumo, tmin=18, tmax=31, **extra):
+    return {"uf": "RS", "entidade": "Rio Grande", "resumo": resumo, "temp_max": tmax, "temp_min": tmin,
+            "dir_vento": "NE-E", "int_vento": "Fracos", "cod_icone": "34",
+            "icone": "data:image/png;base64,AAAA", "umidade_max": 100, "umidade_min": 50, **extra}
+
+
+def _previsao(geocode="4315602", resumo="Muitas nuvens"):
+    return {geocode: {
+        "20/11/2026": {"manha": _turno(resumo), "tarde": _turno("Chuva isolada"), "noite": _turno("Nublado")},
+        "22/11/2026": _turno("Muitas nuvens com possibilidade de chuva isolada", tmin=17, tmax=32),
+        "xx/11/2026": _turno("data inválida"),
+    }}
+
+
+def _fake_previsao(monkeypatch, responder):
+    """responder(geocode) -> dict (200 JSON) ou int (status HTTP)."""
+    from app.collectors import inmet_previsao
+    calls = []
+
+    def fake_get(url, timeout=None):
+        geocode = url.rsplit("/", 1)[-1]
+        calls.append(geocode)
+        return _AvisosResp(responder(geocode))
+    monkeypatch.setattr(inmet_previsao.http_session, "get", fake_get)
+    return calls
+
+
+def test_parse_forecast_periods_flat_days_and_drops_icons():
+    from datetime import date
+    from app.collectors.inmet_previsao import parse_forecast
+    rows = parse_forecast(_previsao(), "4315602")
+    assert [(r["forecast_date"], r["period"]) for r in rows] == [
+        (date(2026, 11, 20), "manha"), (date(2026, 11, 20), "tarde"), (date(2026, 11, 20), "noite"),
+        (date(2026, 11, 22), "dia"),
+    ]
+    assert rows[0]["summary"] == "Muitas nuvens" and rows[0]["temp_max"] == 31.0
+    assert rows[3]["temp_min"] == 17.0 and rows[0]["icon_code"] == "34"
+    assert all("icone" not in r for r in rows)
+    assert parse_forecast(_previsao(), "4314407") is None       # geocode de outro município
+    assert parse_forecast({"4315602": {}}, "4315602") is None
+    assert parse_forecast(["x"], "4315602") is None
+
+
+def test_sync_official_forecasts_replaces_respects_interval_and_keeps_on_failure(client, monkeypatch):
+    from datetime import timedelta
+    from app.collectors.inmet_previsao import sync_official_forecasts
+    from app.models import OfficialForecast
+    monkeypatch.delenv("INMET_PREVISAO_HOURS", raising=False)
+    now = datetime(2026, 11, 20, 12, tzinfo=timezone.utc)
+    calls = _fake_previsao(monkeypatch, lambda g: _previsao(g))
+
+    assert sync_official_forecasts(now=now) == {"updated": 8, "skipped": 0, "failed": 0}
+    assert OfficialForecast.query.count() == 8 * 4
+
+    # Dentro do intervalo de 3 h: nenhuma consulta.
+    assert sync_official_forecasts(now=now + timedelta(hours=2)) == {"updated": 0, "skipped": 8, "failed": 0}
+    assert len(calls) == 8
+
+    # Depois do intervalo: substitui (não acumula); falha de um município mantém a previsão dele.
+    _fake_previsao(monkeypatch, lambda g: 500 if g == "4314407" else _previsao(g, resumo="Céu claro"))
+    assert sync_official_forecasts(now=now + timedelta(hours=4)) == {"updated": 7, "skipped": 0, "failed": 1}
+    assert OfficialForecast.query.count() == 8 * 4
+    pelotas = OfficialForecast.query.filter_by(geocode="4314407", period="manha").one()
+    assert pelotas.summary == "Muitas nuvens" and pelotas.fetched_at == datetime(2026, 11, 20, 12)
+    rio_grande = OfficialForecast.query.filter_by(geocode="4315602", period="manha").one()
+    assert rio_grande.summary == "Céu claro"
+
+
+def test_region_weather_includes_official_forecast_from_today(client, monkeypatch):
+    from datetime import timedelta
+    from app.collectors.inmet_previsao import sync_official_forecasts
+    brt = timezone(timedelta(hours=-3))
+    today = datetime.now(timezone.utc).astimezone(brt).date()
+    fmt = lambda d: d.strftime("%d/%m/%Y")
+    payload = lambda g: {g: {
+        fmt(today - timedelta(days=1)): _turno("Ontem"),
+        fmt(today): {"manha": _turno("Manhã nublada"), "noite": _turno("Noite limpa")},
+        fmt(today + timedelta(days=2)): _turno("Depois de amanhã", tmin=15, tmax=24),
+    }}
+    _fake_previsao(monkeypatch, payload)
+    sync_official_forecasts()
+
+    region_id = Region.query.first().id  # Rio Grande
+    fc = client.get(f"/api/weather/{region_id}").get_json()["official_forecast"]
+    assert fc["municipality"] == "Rio Grande" and fc["fetched_at"].endswith("+00:00")
+    assert [d["date"] for d in fc["days"]] == [today.isoformat(), (today + timedelta(days=2)).isoformat()]
+    assert [p["period"] for p in fc["days"][0]["periods"]] == ["manha", "noite"]
+    assert fc["days"][1]["temp_min"] == 15 and fc["days"][1]["periods"][0]["period"] == "dia"
+
+
+def test_region_weather_without_official_forecast(client):
+    region_id = Region.query.first().id
+    assert client.get(f"/api/weather/{region_id}").get_json()["official_forecast"] is None
+
+
+def test_forecast_interval_env(monkeypatch):
+    from app.collectors.inmet_previsao import get_interval_hours
+    monkeypatch.setenv("INMET_PREVISAO_HOURS", "6")
+    assert get_interval_hours() == 6
+    for bad in ("abc", "0", "-1"):
+        monkeypatch.setenv("INMET_PREVISAO_HOURS", bad)
+        assert get_interval_hours() == 3
+
+
+# --- Normais oficiais INMET 1991–2020 ---
+
+def _xlsx(rows):
+    """Planilha .xlsx mínima (texto inline) para testar o leitor sem dependências."""
+    import io, zipfile
+    from xml.sax.saxutils import escape
+    def col(i):
+        s = ""
+        i += 1
+        while i:
+            i, r = divmod(i - 1, 26)
+            s = chr(65 + r) + s
+        return s
+    body = "".join(
+        f'<row r="{r + 1}">' + "".join(
+            f'<c r="{col(c)}{r + 1}" t="inlineStr"><is><t>{escape(str(v))}</t></is></c>' for c, v in enumerate(row)
+        ) + "</row>" for r, row in enumerate(rows))
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as z:
+        z.writestr("xl/worksheets/sheet1.xml",
+                   '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+                   f"<sheetData>{body}</sheetData></worksheet>")
+    return buf.getvalue()
+
+
+def _build_script():
+    import importlib.util
+    from pathlib import Path
+    path = Path(__file__).resolve().parents[1] / "scripts" / "build_inmet_normals.py"
+    spec = importlib.util.spec_from_file_location("build_inmet_normals", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_build_inmet_normals_parses_sheets_and_gaps():
+    mod = _build_script()
+    months = [str(10 + m) for m in range(12)]
+    header = [["Normal Climatológica do Brasil 1991-2020"], ["Código", "Nome", "UF"] + ["Mês"] * 12 + ["Ano"]]
+    def sheet(value_rows):
+        return _xlsx(header + value_rows)
+    full = lambda code: [code, "X", "RS"] + months + ["999"]
+    gap = lambda code: [code, "X", "RS"] + ["-"] * 12 + ["-"]
+    sheets = {
+        "ESTAÇÕES": _xlsx([["Nº", "Código", "Nome", "UF", "Lat", "Lon"],
+                           ["1", "83985", "PELOTAS", "RS", "-31.78333", "-52.41666"],
+                           ["2", "83995", "RIO GRANDE", "RS", "-32.0788", "-52.1677"],
+                           ["3", "83997", "SANTA VITORIA DO PALMAR", "RS", "-33.5316", "-53.3502"],
+                           ["4", "83967", "PORTO ALEGRE", "RS", "-30.05", "-51.17"]]),
+        "PREC": sheet([full("83985"), full("83995"), full("83997"), full("83967")]),
+        "PRENDIAS1": sheet([full("83985"), full("83997")]),          # Rio Grande ausente
+        "TMEDSECA": sheet([full("83985"), gap("83995"), full("83997")]),
+        "TMAX": sheet([full("83985"), full("83997")]),
+        "TMIN": sheet([full("83985"), full("83995"), full("83997")]),
+    }
+    doc = mod.build(sheets)
+    assert [s["code"] for s in doc["stations"]] == ["83985", "83995", "83997"]
+    pelotas, rio_grande, svp = doc["stations"]
+    assert svp["name"] == "Santa Vitória do Palmar" and pelotas["latitude"] == -31.7833
+    assert pelotas["months"][0] == {"month": 1, "total_rain_mm": 10.0, "rainy_days": 10, "avg_temp_c": 10.0,
+                                    "mean_max_temp_c": 10.0, "mean_min_temp_c": 10.0}
+    assert rio_grande["months"][11]["rainy_days"] is None and rio_grande["months"][11]["avg_temp_c"] is None
+    assert rio_grande["months"][11]["total_rain_mm"] == 21.0
+
+
+def test_inmet_normals_json_matches_published_values():
+    from app.services.inmet_normals import load_normals
+    data = load_normals()
+    assert data["period"] == "1991-2020"
+    by_code = {s["code"]: s for s in data["stations"]}
+    jan = by_code["83985"]["months"][0]
+    assert (jan["total_rain_mm"], jan["rainy_days"], jan["avg_temp_c"]) == (115.9, 9, 23.5)
+    assert by_code["83985"]["months"][6]["mean_max_temp_c"] == 17.8
+    assert by_code["83995"]["months"][7]["avg_temp_c"] is None          # falha publicada (agosto)
+    assert all(len(s["months"]) == 12 for s in data["stations"])
+
+
+def test_region_inmet_normal_nearest_station_and_radius(monkeypatch):
+    from app.services.inmet_normals import get_region_inmet_normal
+    monkeypatch.delenv("INMET_NORMALS_MAX_DISTANCE_KM", raising=False)
+    chui = Region(municipality="Chuí", name="Chuí (Centro)", latitude=-33.6886, longitude=-53.4569)
+    normal = get_region_inmet_normal(chui, 7)
+    assert normal["station_code"] == "83997" and 15 < normal["distance_km"] < 25
+    assert normal["month"] == 7 and normal["period"] == "1991-2020"
+    jaguarao = Region(municipality="Jaguarão", name="Jaguarão (Centro)", latitude=-32.5604, longitude=-53.3760)
+    assert get_region_inmet_normal(jaguarao, 7) is None
+    monkeypatch.setenv("INMET_NORMALS_MAX_DISTANCE_KM", "200")
+    assert get_region_inmet_normal(jaguarao, 7) is not None
+
+
+def test_climate_history_includes_inmet_normal(client):
+    region_id = Region.query.first().id  # Rio Grande (Centro)
+    data = client.get(f"/api/climate-history/{region_id}?month=1&year=2025").get_json()
+    assert data["inmet_normal"]["station_code"] == "83995"
+    assert data["inmet_normal"]["total_rain_mm"] == 97.3
+
+
+def _validate_script():
+    import importlib.util
+    from pathlib import Path
+    path = Path(__file__).resolve().parents[1] / "scripts" / "validate_era5_bdmep.py"
+    spec = importlib.util.spec_from_file_location("validate_era5_bdmep", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _bdmep_csv(code, lat, lon, start, hours, rain=lambda t: 0, temp=lambda t: 20.0, skip=lambda t: False):
+    """CSV horário no formato do BDMEP (latin-1, ';', vírgula decimal, hora UTC)."""
+    from datetime import timedelta
+    head = [
+        "REGIAO:;S", "UF:;RS", "ESTACAO:;TESTE", f"CODIGO (WMO):;{code}",
+        f"LATITUDE:;{str(lat).replace('.', ',')}", f"LONGITUDE:;{str(lon).replace('.', ',')}",
+        "ALTITUDE:;10", "DATA DE FUNDACAO:;01/01/01",
+        "Data;Hora UTC;PRECIPITAÇÃO TOTAL, HORÁRIO (mm);P;PMAX;PMIN;RAD;TEMPERATURA DO AR (°C);ORV;TMAX;TMIN;"
+        "OMAX;OMIN;UMAX;UMIN;UR;DIR;RAJ;VEL;",
+    ]
+    rows = []
+    for i in range(hours):
+        t = start + timedelta(hours=i)
+        if skip(t):
+            r, tt = "", ""
+        else:
+            r, tt = str(rain(t)).replace(".", ","), str(temp(t)).replace(".", ",")
+        rows.append(f"{t:%Y/%m/%d};{t:%H%M} UTC;{r};1010;1010;1010;;{tt};15;{tt};{tt};;;;;80;90;5;2;")
+    return "\n".join(head + rows)
+
+
+def test_bdmep_monthly_summary_local_day_and_completeness():
+    from datetime import datetime
+    mod = _validate_script()
+    # fev/2025 em UTC-3 = 01/02 03:00 UTC até 01/03 02:00 UTC; começa 1 dia antes p/ cobrir tudo.
+    start = datetime(2025, 1, 31, 0)
+    rain = lambda t: 5.0 if (t.day, t.hour) in ((10, 12), (1, 1)) and t.month in (2, 3) else 0.0
+    temp = lambda t: 30.0 if (t.month, t.day, t.hour) == (2, 14, 18) else (-1.0 if (t.month, t.day, t.hour) == (2, 15, 8) else 20.0)
+    parsed = mod.parse_station_csv(_bdmep_csv("A802", -32.0, -52.1, start, 24 * 31, rain, temp))
+    assert parsed["code"] == "A802" and parsed["latitude"] == -32.0
+    feb = mod.monthly_summary(parsed["hours"])[(2025, 2)]
+    # 01/03 01:00 UTC = 28/02 22:00 local: a chuva conta em fevereiro.
+    assert feb["total_rain_mm"] == 10.0 and feb["rainy_days"] == 2
+    assert feb["max_temp_c"] == 30.0 and feb["min_temp_c"] == -1.0
+    assert feb["temp_completeness"] == 1.0
+
+    # Sem 4 dias de dados (~86% das horas): o mês não entra.
+    gap = lambda t: t.month == 2 and 3 <= t.day <= 6
+    parsed = mod.parse_station_csv(_bdmep_csv("A802", -32.0, -52.1, start, 24 * 31, rain, temp, skip=gap))
+    feb = mod.monthly_summary(parsed["hours"])[(2025, 2)]
+    assert feb["total_rain_mm"] is None and feb["rainy_days"] is None and feb["avg_temp_c"] is None
+
+
+def test_bdmep_compare_flags_suspect_rain_and_pairs_region():
+    mod = _validate_script()
+    station = {
+        (2025, 1): {"total_rain_mm": 100.0, "rainy_days": 8, "avg_temp_c": 23.0, "max_temp_c": 33.0, "min_temp_c": 14.0},
+        (2025, 3): {"total_rain_mm": 1.0, "rainy_days": 0, "avg_temp_c": 22.0, "max_temp_c": 35.0, "min_temp_c": 12.0},
+        (2025, 4): {"total_rain_mm": None, "rainy_days": None, "avg_temp_c": None, "max_temp_c": None, "min_temp_c": None},
+    }
+    era5 = {
+        (2025, 1): {"total_rain_mm": 80.0, "rainy_days": 12, "avg_temp_c": 23.5, "max_temp_c": 32.0, "min_temp_c": 15.0},
+        (2025, 3): {"total_rain_mm": 87.0, "rainy_days": 13, "avg_temp_c": 22.4, "max_temp_c": 34.0, "min_temp_c": 13.0},
+        (2025, 4): {"total_rain_mm": 120.0, "rainy_days": 9, "avg_temp_c": 18.0, "max_temp_c": 27.0, "min_temp_c": 7.0},
+    }
+    pairs, suspects = mod.compare(station, era5)
+    assert suspects == [(2025, 3, 1.0, 87.0)]
+    rain_pairs = [p for p in pairs if p[0] == "total_rain_mm"]
+    assert rain_pairs == [("total_rain_mm", 2025, 1, 100.0, 80.0)]
+    st = mod.stats(pairs)
+    assert st["avg_temp_c"][0] == 2 and round(st["avg_temp_c"][1], 2) == 0.45
+    assert st["rainy_days"][1] == 4
+    assert not mod.is_suspect_rain(5.0, 30.0)  # ERA5 baixo demais p/ julgar
+
+    regions = [{"id": 1, "name": "Perto", "latitude": -32.05, "longitude": -52.1},
+               {"id": 2, "name": "Longe", "latitude": -33.5, "longitude": -53.4}]
+    assert mod.nearest_region(regions, -32.0, -52.1)[0]["id"] == 1
+    assert mod.nearest_region(regions, -30.0, -51.0) is None
+
+
+def test_bdmep_collect_and_report_from_zip(tmp_path):
+    import io, zipfile
+    from datetime import datetime
+    mod = _validate_script()
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr("2025/INMET_S_RS_A802_RIO GRANDE_01-01-2025_A_31-12-2025.CSV",
+                    _bdmep_csv("A802", -32.0, -52.1, datetime(2025, 1, 1, 3), 24 * 31, rain=lambda t: 0.5).encode("latin-1"))
+        zf.writestr("2025/INMET_S_RS_A801_PORTO ALEGRE_01-01-2025_A_31-12-2025.CSV", "ignorada")
+    (tmp_path / "2025.zip").write_bytes(buf.getvalue())
+
+    stations = mod.collect_station_months([2025], cache_dir=str(tmp_path))
+    assert list(stations) == ["A802"]
+    jan = stations["A802"]["months"][(2025, 1)]
+    assert jan["total_rain_mm"] == 372.0 and jan["rainy_days"] == 31
+
+    regions = [{"id": 7, "name": "Rio Grande (Centro)", "latitude": -32.035, "longitude": -52.0986}]
+    era5 = {7: {(2025, 1): {"total_rain_mm": 300.0, "rainy_days": 20, "avg_temp_c": 21.0, "max_temp_c": 22.0, "min_temp_c": 19.0}}}
+    report = mod.render_report(stations, regions, era5, [2025])
+    assert "## A802 Rio Grande" in report and "Rio Grande (Centro) (3.9 km)" in report
+    assert "| Chuva do mês (mm) | 1 | -72.0 | 72.0 | 372 | 300 |" in report
+    assert "| jan | +1.0 |" in report

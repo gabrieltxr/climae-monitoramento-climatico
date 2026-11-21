@@ -1267,6 +1267,8 @@
             <div class="meta-info" id="stationMeta" style="display:none; margin-top:8px;"></div>
             <!-- Avisos oficiais do INMET para o município da região (só aparece quando há aviso) -->
             <div id="officialWarnings" style="display:none; margin-top:8px;"></div>
+            <!-- Previsão oficial do INMET para o município (texto; só aparece quando há dado) -->
+            <div id="officialForecast" class="meta-info" style="display:none; margin-top:8px;"></div>
 
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 0.55rem; flex-wrap:wrap;">
                 <span class="meta-info">Tendência Horária — Próximas 24h (Horário de Brasília)</span>
@@ -1344,7 +1346,7 @@
             <div id="map"></div>
             <div id="mapDynamicLegend" class="map-legend-bar">
                 <span>Clique em um ponto para focar a localidade no painel</span>
-                <span>🟢 Baixo • 🟡 Médio • 🟠 Alto • 🔴 Muito Alto</span>
+                <span>🟢 Baixo • 🟡 Moderado • 🟠 Alto • 🔴 Muito Alto • ⚪ Sem dado</span>
             </div>
         </div>
     </div>
@@ -1491,6 +1493,8 @@
                 <small id="climExtremesDetail" style="color: var(--text-muted);">Mais seco: --</small>
             </div>
         </div>
+        <!-- Normal oficial INMET 1991–2020 da estação mais próxima (só aparece quando há estação no raio) -->
+        <div id="climInmetNormal" class="meta-info" style="display:none; margin-top:8px;"></div>
 
         <!-- 2 Gráficos Comparativos Lado a Lado -->
         <div class="climate-charts-grid">
@@ -1953,11 +1957,24 @@
             });
         }
 
+        // O motor gera "Baixo", "Moderado", "Alto", "Muito alto", com ou sem " (Provisório)",
+        // e "Inconclusivo (...)". Sem avaliação recente a API manda null → "Sem dado" (cinza).
+        function riskBaseLevel(level) {
+            const l = (level || '').toLowerCase();
+            if (l.startsWith('muito alto')) return 'Muito alto';
+            if (l.startsWith('alto')) return 'Alto';
+            if (l.startsWith('moderado')) return 'Moderado';
+            if (l.startsWith('baixo')) return 'Baixo';
+            return null;
+        }
+
         function getRiskColor(level) {
-            if (level === 'Muito alto') return '#ef4444';
-            if (level === 'Alto') return '#fb923c';
-            if (level === 'Médio') return '#facc15';
-            return '#4ade80';
+            const base = riskBaseLevel(level);
+            if (base === 'Muito alto') return '#ef4444';
+            if (base === 'Alto') return '#fb923c';
+            if (base === 'Moderado') return '#facc15';
+            if (base === 'Baixo') return '#4ade80';
+            return '#94a3b8';
         }
 
         function degreesToCardinal(deg) {
@@ -1976,7 +1993,7 @@
             if (layerName === 'risk') {
                 legend.innerHTML = `
                     <span>Camada: <strong>Risco & Condições Regionais</strong></span>
-                    <span>🟢 Baixo • 🟡 Médio • 🟠 Alto • 🔴 Muito Alto</span>
+                    <span>🟢 Baixo • 🟡 Moderado • 🟠 Alto • 🔴 Muito Alto • ⚪ Sem dado</span>
                     <span style="opacity:0.8; font-size:0.72rem; color:#38bdf8;">• Dê zoom para ver subdivisões locais</span>
                 `;
             } else if (layerName === 'wind') {
@@ -2027,7 +2044,7 @@
                 });
 
                 // Helper de prioridade de severidade de risco
-                const riskPriority = { 'Muito alto': 4, 'Alto': 3, 'Médio': 2, 'Baixo': 1, 'Inconclusivo': 0 };
+                const riskPriority = { 'Muito alto': 4, 'Alto': 3, 'Moderado': 2, 'Baixo': 1 };
 
                 Object.keys(grouped).forEach(city => {
                     const items = grouped[city];
@@ -2036,7 +2053,7 @@
                     let sumLat = 0, sumLon = 0;
                     let sumU = 0, sumV = 0, sumSpeed = 0, maxSpeed = 0;
                     let sumTemp = 0, validTempCount = 0, minTemp = Infinity, maxTemp = -Infinity;
-                    let maxRiskLevel = 'Baixo', maxRiskScore = 0;
+                    let maxRiskLevel = 'Sem dado', maxRiskScore = null;
 
                     items.forEach(it => {
                         sumLat += it.latitude;
@@ -2060,11 +2077,11 @@
                         }
 
                         // Risco predominante mais severo
-                        const currentPri = riskPriority[it.risk_level] ?? 0;
-                        const highestPri = riskPriority[maxRiskLevel] ?? 0;
-                        if (currentPri > highestPri || (currentPri === highestPri && (it.risk_score ?? 0) > maxRiskScore)) {
+                        const currentPri = riskPriority[riskBaseLevel(it.risk_level)] ?? 0;
+                        const highestPri = riskPriority[riskBaseLevel(maxRiskLevel)] ?? 0;
+                        if (currentPri > highestPri || (currentPri === highestPri && it.risk_score != null && it.risk_score > (maxRiskScore ?? -1))) {
                             maxRiskLevel = it.risk_level;
-                            maxRiskScore = it.risk_score ?? 0;
+                            maxRiskScore = it.risk_score;
                         }
                     });
 
@@ -2086,7 +2103,7 @@
                                     <span class="risk-macro-dot" style="background: ${riskColor}; box-shadow: 0 0 8px ${riskColor};"></span>
                                     <span class="risk-macro-city" style="color: #fff;">${city}</span>
                                     <span>•</span>
-                                    <span class="risk-macro-level" style="color: #fff;">${maxRiskLevel} (${maxRiskScore.toFixed(0)})</span>
+                                    <span class="risk-macro-level" style="color: #fff;">${maxRiskLevel} (${maxRiskScore?.toFixed(0) ?? '--'})</span>
                                 </div>
                             `;
                             iconSize = [155, 34];
@@ -2095,7 +2112,7 @@
                             iconHtml = `
                                 <div class="risk-macro-compact" style="border-color: ${riskColor}; box-shadow: 0 0 10px ${riskColor}55;">
                                     <span class="risk-macro-dot" style="background: ${riskColor};"></span>
-                                    <span style="font-size: 0.68rem; font-weight: 800; color: ${riskColor};">${maxRiskScore.toFixed(0)}</span>
+                                    <span style="font-size: 0.68rem; font-weight: 800; color: ${riskColor};">${maxRiskScore?.toFixed(0) ?? '--'}</span>
                                 </div>
                             `;
                             iconSize = [44, 22];
@@ -2108,7 +2125,7 @@
                         // Tooltip no hover (Alternativa 1 - Padrão Windy: sem colisão de textos)
                         marker.bindTooltip(`
                             <div style="font-weight: 700; color: #38bdf8; text-transform: uppercase; font-size: 0.72rem; letter-spacing: 0.05em; margin-bottom: 2px;">${city}</div>
-                            <div>Risco: <strong style="color:${riskColor};">${maxRiskLevel}</strong> (${maxRiskScore.toFixed(1)} pts)</div>
+                            <div>Risco: <strong style="color:${riskColor};">${maxRiskLevel}</strong> (${maxRiskScore?.toFixed(1) ?? '--'} pts)</div>
                             <div style="font-size: 0.68rem; color: #94a3b8; margin-top: 2px;">Integrando ${count} bairros</div>
                         `, {
                             className: 'leaflet-tooltip-climae',
@@ -2127,7 +2144,7 @@
                             <div style="font-family: Inter, sans-serif; color: #f8fafc; line-height: 1.5; font-size: 0.84rem; min-width: 240px;">
                                 <strong style="color: #38bdf8; font-size: 0.95rem;">🛡️ Risco Macrorregional — ${city}</strong><br>
                                 <div style="margin: 6px 0; padding: 6px 8px; background: rgba(15, 23, 42, 0.7); border-radius: 6px; border: 1px solid rgba(255,255,255,0.08);">
-                                    Severidade Máxima: <strong style="color:${riskColor};">${maxRiskLevel}</strong> (${maxRiskScore.toFixed(1)} pts)<br>
+                                    Severidade Máxima: <strong style="color:${riskColor};">${maxRiskLevel}</strong> (${maxRiskScore?.toFixed(1) ?? '--'} pts)<br>
                                     Sub-regiões integradas: <strong>${count} localidades</strong>
                                 </div>
                                 <div style="font-size: 0.75rem; color: #94a3b8; margin-top: 6px;">
@@ -2571,7 +2588,7 @@
                             🌡️ Temp: <strong>${item.temperature_c ?? '--'} °C</strong> | 💧 Umid: <strong>${item.humidity_percent ?? '--'}%</strong><br>
                             💨 Vento: <strong>${item.wind_speed ?? '--'} km/h</strong> (Origem: ${cardinal} / ${item.wind_direction ?? '--'}°)<br>
                             🌧️ Chuva 24h: <strong>${item.rain_next_24h_mm} mm</strong><br>
-                            ⚠️ Risco: <strong style="color: ${getRiskColor(item.risk_level)};">${item.risk_level} (${item.risk_score})</strong>
+                            ⚠️ Risco: <strong style="color: ${getRiskColor(item.risk_level)};">${item.risk_level} (${item.risk_score ?? '--'})</strong>
                         </div>
                     `);
 
@@ -2601,6 +2618,7 @@
                 const res = await fetch('/api/weather-summary');
                 const data = await res.json();
                 lastMapSummaryData = Array.isArray(data) ? data : (data.summary || data.regions || []);
+                lastMapSummaryData.forEach(it => { it.risk_level = it.risk_level ?? 'Sem dado'; });
                 renderMapByActiveLayer();
             } catch (err) {
                 console.error("Erro ao carregar resumo do mapa:", err);
@@ -2660,6 +2678,30 @@
                 warnEl.append(line);
             });
             warnEl.style.display = warnings.length ? '' : 'none';
+
+            // Previsão oficial do INMET (texto externo: só textContent). Mínimo funcional;
+            // o visual fica para a reconstrução do frontend.
+            const fcEl = document.getElementById('officialForecast');
+            const ofc = data.official_forecast;
+            fcEl.replaceChildren();
+            if (ofc && Array.isArray(ofc.days) && ofc.days.length) {
+                const periodNames = { manha: 'manhã', tarde: 'tarde', noite: 'noite' };
+                const title = document.createElement('div');
+                title.textContent = `📋 Previsão oficial INMET — ${ofc.municipality} (consultada em ${formatBRT(ofc.fetched_at)})`;
+                fcEl.append(title);
+                ofc.days.forEach(d => {
+                    const [y, m, dd] = d.date.split('-').map(Number);
+                    const label = new Date(y, m - 1, dd).toLocaleDateString('pt-BR', { weekday: 'short', day: '2-digit', month: '2-digit' });
+                    const temps = (d.temp_min != null && d.temp_max != null) ? `${d.temp_min}–${d.temp_max} °C` : '-- °C';
+                    const texts = d.periods.map(p => periodNames[p.period] ? `${periodNames[p.period]}: ${p.summary}` : p.summary);
+                    const line = document.createElement('div');
+                    line.textContent = `• ${label}: ${temps} — ${texts.join('; ')}`;
+                    fcEl.append(line);
+                });
+                fcEl.style.display = '';
+            } else {
+                fcEl.style.display = 'none';
+            }
 
             if (data.region && map) {
                 map.panTo([data.region.latitude, data.region.longitude]);
@@ -3333,6 +3375,22 @@
             document.getElementById('climNormTempRange').textContent = norm
                 ? `Mín abs: ${norm.min_temp_c}°C / Máx abs: ${norm.max_temp_c}°C`
                 : '--';
+
+            // Normal oficial INMET (mínimo funcional; visual fica para a reconstrução do frontend)
+            const inmetEl = document.getElementById('climInmetNormal');
+            const inm = data.inmet_normal;
+            if (inm) {
+                const v = (x, unit) => (x === null || x === undefined) ? 'sem dado' : `${x} ${unit}`;
+                inmetEl.textContent =
+                    `📊 Normal oficial INMET ${inm.period} — estação ${inm.station_name} (${inm.distance_km} km): ` +
+                    `chuva ${v(inm.total_rain_mm, 'mm')} • dias com chuva ≥1 mm ${v(inm.rainy_days, '')} • ` +
+                    `média ${v(inm.avg_temp_c, '°C')} • média das máximas ${v(inm.mean_max_temp_c, '°C')} • ` +
+                    `média das mínimas ${v(inm.mean_min_temp_c, '°C')}`;
+                inmetEl.style.display = '';
+            } else {
+                inmetEl.textContent = '';
+                inmetEl.style.display = 'none';
+            }
 
             if (ext.wettest) {
                 document.getElementById('climWettestYear').textContent = `Recorde: ${ext.wettest.year} (${ext.wettest.total_rain_mm} mm)`;

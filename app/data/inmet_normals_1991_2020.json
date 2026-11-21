@@ -1,0 +1,319 @@
+{
+  "period": "1991-2020",
+  "source": "INMET — Normais Climatológicas do Brasil 1991-2020 (estações convencionais)",
+  "source_url": "https://portal.inmet.gov.br/normais",
+  "stations": [
+    {
+      "code": "83985",
+      "name": "Pelotas",
+      "latitude": -31.7833,
+      "longitude": -52.4167,
+      "months": [
+        {
+          "month": 1,
+          "total_rain_mm": 115.9,
+          "rainy_days": 9,
+          "avg_temp_c": 23.5,
+          "mean_max_temp_c": 28.6,
+          "mean_min_temp_c": 19.5
+        },
+        {
+          "month": 2,
+          "total_rain_mm": 141.8,
+          "rainy_days": 9,
+          "avg_temp_c": 23.2,
+          "mean_max_temp_c": 28.4,
+          "mean_min_temp_c": 19.3
+        },
+        {
+          "month": 3,
+          "total_rain_mm": 107.2,
+          "rainy_days": 9,
+          "avg_temp_c": 21.9,
+          "mean_max_temp_c": 27.3,
+          "mean_min_temp_c": 18.0
+        },
+        {
+          "month": 4,
+          "total_rain_mm": 111.1,
+          "rainy_days": 8,
+          "avg_temp_c": 19.0,
+          "mean_max_temp_c": 24.7,
+          "mean_min_temp_c": 15.0
+        },
+        {
+          "month": 5,
+          "total_rain_mm": 117.1,
+          "rainy_days": 8,
+          "avg_temp_c": 15.6,
+          "mean_max_temp_c": 21.1,
+          "mean_min_temp_c": 11.9
+        },
+        {
+          "month": 6,
+          "total_rain_mm": 107.7,
+          "rainy_days": 7,
+          "avg_temp_c": 13.1,
+          "mean_max_temp_c": 18.5,
+          "mean_min_temp_c": 9.4
+        },
+        {
+          "month": 7,
+          "total_rain_mm": 112.7,
+          "rainy_days": 8,
+          "avg_temp_c": 12.3,
+          "mean_max_temp_c": 17.8,
+          "mean_min_temp_c": 8.5
+        },
+        {
+          "month": 8,
+          "total_rain_mm": 117.4,
+          "rainy_days": 8,
+          "avg_temp_c": 13.8,
+          "mean_max_temp_c": 19.3,
+          "mean_min_temp_c": 9.9
+        },
+        {
+          "month": 9,
+          "total_rain_mm": 128.7,
+          "rainy_days": 9,
+          "avg_temp_c": 15.3,
+          "mean_max_temp_c": 20.0,
+          "mean_min_temp_c": 11.6
+        },
+        {
+          "month": 10,
+          "total_rain_mm": 120.2,
+          "rainy_days": 9,
+          "avg_temp_c": 17.9,
+          "mean_max_temp_c": 22.4,
+          "mean_min_temp_c": 14.2
+        },
+        {
+          "month": 11,
+          "total_rain_mm": 99.4,
+          "rainy_days": 7,
+          "avg_temp_c": 20.1,
+          "mean_max_temp_c": 25.1,
+          "mean_min_temp_c": 15.9
+        },
+        {
+          "month": 12,
+          "total_rain_mm": 103.2,
+          "rainy_days": 8,
+          "avg_temp_c": 22.2,
+          "mean_max_temp_c": 27.4,
+          "mean_min_temp_c": 18.0
+        }
+      ]
+    },
+    {
+      "code": "83995",
+      "name": "Rio Grande",
+      "latitude": -32.0788,
+      "longitude": -52.1677,
+      "months": [
+        {
+          "month": 1,
+          "total_rain_mm": 97.3,
+          "rainy_days": null,
+          "avg_temp_c": 23.5,
+          "mean_max_temp_c": null,
+          "mean_min_temp_c": 20.0
+        },
+        {
+          "month": 2,
+          "total_rain_mm": 128.7,
+          "rainy_days": null,
+          "avg_temp_c": 23.4,
+          "mean_max_temp_c": null,
+          "mean_min_temp_c": 19.8
+        },
+        {
+          "month": 3,
+          "total_rain_mm": 120.0,
+          "rainy_days": null,
+          "avg_temp_c": 22.5,
+          "mean_max_temp_c": null,
+          "mean_min_temp_c": 18.9
+        },
+        {
+          "month": 4,
+          "total_rain_mm": 125.8,
+          "rainy_days": null,
+          "avg_temp_c": 19.3,
+          "mean_max_temp_c": null,
+          "mean_min_temp_c": 15.5
+        },
+        {
+          "month": 5,
+          "total_rain_mm": 112.0,
+          "rainy_days": null,
+          "avg_temp_c": 16.0,
+          "mean_max_temp_c": null,
+          "mean_min_temp_c": 12.5
+        },
+        {
+          "month": 6,
+          "total_rain_mm": 120.2,
+          "rainy_days": null,
+          "avg_temp_c": 13.4,
+          "mean_max_temp_c": null,
+          "mean_min_temp_c": 10.0
+        },
+        {
+          "month": 7,
+          "total_rain_mm": 121.9,
+          "rainy_days": null,
+          "avg_temp_c": 12.5,
+          "mean_max_temp_c": null,
+          "mean_min_temp_c": 9.1
+        },
+        {
+          "month": 8,
+          "total_rain_mm": 114.8,
+          "rainy_days": null,
+          "avg_temp_c": null,
+          "mean_max_temp_c": null,
+          "mean_min_temp_c": 10.4
+        },
+        {
+          "month": 9,
+          "total_rain_mm": 110.8,
+          "rainy_days": null,
+          "avg_temp_c": 15.2,
+          "mean_max_temp_c": null,
+          "mean_min_temp_c": 11.9
+        },
+        {
+          "month": 10,
+          "total_rain_mm": 106.2,
+          "rainy_days": null,
+          "avg_temp_c": 17.9,
+          "mean_max_temp_c": null,
+          "mean_min_temp_c": 14.7
+        },
+        {
+          "month": 11,
+          "total_rain_mm": 94.0,
+          "rainy_days": null,
+          "avg_temp_c": 20.0,
+          "mean_max_temp_c": null,
+          "mean_min_temp_c": 16.6
+        },
+        {
+          "month": 12,
+          "total_rain_mm": 89.8,
+          "rainy_days": null,
+          "avg_temp_c": 22.2,
+          "mean_max_temp_c": null,
+          "mean_min_temp_c": 18.5
+        }
+      ]
+    },
+    {
+      "code": "83997",
+      "name": "Santa Vitória do Palmar",
+      "latitude": -33.5317,
+      "longitude": -53.3503,
+      "months": [
+        {
+          "month": 1,
+          "total_rain_mm": 81.4,
+          "rainy_days": 6,
+          "avg_temp_c": 22.6,
+          "mean_max_temp_c": 27.8,
+          "mean_min_temp_c": 18.4
+        },
+        {
+          "month": 2,
+          "total_rain_mm": 128.0,
+          "rainy_days": 8,
+          "avg_temp_c": 22.4,
+          "mean_max_temp_c": 27.4,
+          "mean_min_temp_c": 18.3
+        },
+        {
+          "month": 3,
+          "total_rain_mm": 116.4,
+          "rainy_days": 7,
+          "avg_temp_c": 21.1,
+          "mean_max_temp_c": 26.2,
+          "mean_min_temp_c": 17.1
+        },
+        {
+          "month": 4,
+          "total_rain_mm": 123.3,
+          "rainy_days": 7,
+          "avg_temp_c": 18.1,
+          "mean_max_temp_c": 23.3,
+          "mean_min_temp_c": 14.3
+        },
+        {
+          "month": 5,
+          "total_rain_mm": 119.2,
+          "rainy_days": 7,
+          "avg_temp_c": 14.8,
+          "mean_max_temp_c": 19.7,
+          "mean_min_temp_c": 11.2
+        },
+        {
+          "month": 6,
+          "total_rain_mm": 113.1,
+          "rainy_days": 8,
+          "avg_temp_c": 12.1,
+          "mean_max_temp_c": 16.8,
+          "mean_min_temp_c": 8.6
+        },
+        {
+          "month": 7,
+          "total_rain_mm": 112.7,
+          "rainy_days": 7,
+          "avg_temp_c": 11.2,
+          "mean_max_temp_c": 15.9,
+          "mean_min_temp_c": 7.8
+        },
+        {
+          "month": 8,
+          "total_rain_mm": 108.2,
+          "rainy_days": 8,
+          "avg_temp_c": 12.5,
+          "mean_max_temp_c": 17.6,
+          "mean_min_temp_c": 8.8
+        },
+        {
+          "month": 9,
+          "total_rain_mm": 97.0,
+          "rainy_days": 7,
+          "avg_temp_c": 13.8,
+          "mean_max_temp_c": 18.7,
+          "mean_min_temp_c": 10.0
+        },
+        {
+          "month": 10,
+          "total_rain_mm": 102.4,
+          "rainy_days": 8,
+          "avg_temp_c": 16.4,
+          "mean_max_temp_c": 21.3,
+          "mean_min_temp_c": 12.5
+        },
+        {
+          "month": 11,
+          "total_rain_mm": 70.0,
+          "rainy_days": 6,
+          "avg_temp_c": 18.7,
+          "mean_max_temp_c": 24.0,
+          "mean_min_temp_c": 14.4
+        },
+        {
+          "month": 12,
+          "total_rain_mm": 91.5,
+          "rainy_days": 7,
+          "avg_temp_c": 21.1,
+          "mean_max_temp_c": 26.5,
+          "mean_min_temp_c": 16.7
+        }
+      ]
+    }
+  ]
+}

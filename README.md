@@ -60,6 +60,7 @@ Aplicação web modular em Python (Flask) desenvolvida para monitoramento meteor
 * **Série Histórica Contínua:** Dados mensais de **2000 a 2026** obtidos via reanálise global ERA5 (Open-Meteo Archive).
 * **Normais Climatológicas:** Médias históricas dos 12 meses do ano para comparação de desvios e anomalias de temperatura (°C) e precipitação (mm).
 * **Projeção Sazonal:** Diagnóstico automático comparando o mês corrente com o padrão histórico da localidade.
+* **Normal oficial INMET 1991–2020 (referência):** para o mês escolhido, mostra a normal da estação convencional mais próxima (Pelotas, Rio Grande ou Santa Vitória do Palmar) até `INMET_NORMALS_MAX_DISTANCE_KM` (padrão 60 km): chuva, dias com chuva ≥ 1 mm, temperatura média e médias das máximas e mínimas. Jaguarão fica a mais de 100 km de todas e não recebe. A estação de Rio Grande tem falhas no período (sem máximas, sem dias de chuva, sem a média de agosto), que aparecem como "sem dado". As anomalias continuam calculadas sobre a normal ERA5.
 
 ### 07. Histórico de Eventos e Ocorrências Documentadas
 * Registro georreferenciado de eventos adversos (alagamentos, destelhamentos, quedas de árvores, ressacas).
@@ -158,6 +159,14 @@ Acesse a aplicação no navegador em: **`http://127.0.0.1:5000`**
 > ciclo faz só um HEAD (~2 KB) e baixa a lista quando o tamanho dela muda, ou a cada
 > `INMET_AVISOS_FULL_REFRESH_MINUTES` (padrão 60) para pegar mudanças que não alteram o
 > tamanho.
+>
+> **Previsão oficial do INMET por município (automático, sem token):** o agendador lê a
+> previsão de 5 dias de cada um dos 8 municípios (`apiprevmet3.inmet.gov.br/previsao/{código IBGE}`)
+> no máximo a cada `INMET_PREVISAO_HOURS` (padrão 3) e guarda só a última (resumo em texto,
+> temperatura mínima/máxima, umidade e vento descritivo; dias 1–2 por turno). Aparece no painel
+> da região, abaixo dos avisos. Não traz chuva em mm nem probabilidade, por isso fica fora do
+> índice de risco e dos alertas. Cada município custa ~250 KB por consulta (quase tudo ícone,
+> que o CLIMAE descarta), ~16 MB/dia no padrão.
 
 ---
 
@@ -169,6 +178,8 @@ Acesse a aplicação no navegador em: **`http://127.0.0.1:5000`**
 * `scripts/run_scheduler.py`: Executa só o agendador (coleta, purga e consolidação mensal) em processo próprio, para uso com servidor WSGI.
 * `scripts/sync_climate_history.py`: Audita a integridade do banco e sincroniza a climatologia ERA5 das 56 regiões.
 * `scripts/seed_monthly_climate.py`: Rotina avançada de carga direta da API ERA5 Open-Meteo.
+* `scripts/build_inmet_normals.py`: Regera `app/data/inmet_normals_1991_2020.json` a partir das planilhas oficiais do INMET (só é preciso se o INMET corrigir as planilhas).
+* `scripts/validate_era5_bdmep.py`: Compara o histórico mensal ERA5 do banco com as estações automáticas do INMET (BDMEP, zips anuais de ~90 MB sem token) e gera um relatório em Markdown; só lê o banco (ex.: `--years 2015-2025 --out relatorio.md`).
 * `scripts/cleanup_all_regions.py`: Limpeza e reestruturação atômica das regiões.
 
 ### Esquema do banco (migrations)

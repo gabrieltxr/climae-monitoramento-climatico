@@ -340,3 +340,31 @@ class OfficialWarning(db.Model):
     @property
     def link(self) -> str:
         return f"https://avisos.inmet.gov.br/{self.inmet_id}"
+
+
+class OfficialForecast(db.Model):
+    """
+    Previsão oficial do INMET por município (apiprevmet3.inmet.gov.br/previsao/{geocode}).
+    Só a última emissão: cada coleta bem-sucedida substitui todas as linhas do município.
+    Dias 1–2 vêm por turno (manha/tarde/noite); dias 3–5 num bloco só (period = "dia").
+    Texto complementar: não traz chuva em mm nem probabilidade, fica fora do risco e dos alertas.
+    """
+    __tablename__ = 'official_forecasts'
+
+    id = db.Column(db.Integer, primary_key=True)
+    geocode = db.Column(db.String(7), nullable=False)                   # IBGE do município
+    forecast_date = db.Column(db.Date, nullable=False)                  # Data local (Brasília)
+    period = db.Column(db.String(10), nullable=False)                   # manha, tarde, noite ou dia
+    summary = db.Column(db.String(200), nullable=False)                 # "resumo"
+    temp_min = db.Column(db.Float, nullable=True)
+    temp_max = db.Column(db.Float, nullable=True)
+    humidity_min = db.Column(db.Float, nullable=True)
+    humidity_max = db.Column(db.Float, nullable=True)
+    wind_direction = db.Column(db.String(10), nullable=True)            # Ex: "NE-E"
+    wind_intensity = db.Column(db.String(30), nullable=True)            # Ex: "Fracos"
+    icon_code = db.Column(db.String(10), nullable=True)                 # "cod_icone" (o ícone base64 é descartado)
+    fetched_at = db.Column(db.DateTime(timezone=True), nullable=False)
+
+    __table_args__ = (
+        db.UniqueConstraint('geocode', 'forecast_date', 'period', name='uq_official_forecast_geocode_date_period'),
+    )

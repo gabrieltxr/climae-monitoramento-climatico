@@ -7,6 +7,8 @@ from app.services.risk_engine import calculate_region_risk
 from app.collectors.traffic_collector import get_traffic_panel_data, update_highway_conditions
 from app.collectors.inmet import get_region_station_summary
 from app.collectors.inmet_avisos import get_active_warnings, get_region_warnings
+from app.collectors.inmet_previsao import get_region_forecast
+from app.services.inmet_normals import get_region_inmet_normal
 
 main_bp = Blueprint('main', __name__)
 
@@ -81,6 +83,7 @@ def api_region_weather(region_id):
         "region": region.to_dict(),
         "station": station,
         "official_warnings": get_region_warnings(region),
+        "official_forecast": get_region_forecast(region),
         "current": {
             "observed_at": to_utc_iso(current_obs.observed_at) if current_obs else None,
             "collected_at": to_utc_iso(current_obs.collected_at) if current_obs and current_obs.collected_at else None,
@@ -160,6 +163,9 @@ def get_weather_summary():
         rain_24h = sum((f.precipitation_mm or 0.0) for f in forecasts)
         fc = forecasts[0] if forecasts else None
         risk = latest_risk.get(r.id)
+        # Sem avaliação recente = "sem dado" (null), nunca "Baixo": o mapa não pode
+        # pintar de verde o que não sabe nem mostrar como atual um risco de dias atrás.
+        risk_current = risk is not None and not _is_older_than(risk.assessed_at, RISK_MAX_AGE_MINUTES)
         summary.append({
             "region_id": r.id,
             "municipality": r.municipality,
@@ -175,8 +181,9 @@ def get_weather_summary():
             "precipitation_mm": current_obs.precipitation_mm if current_obs else 0.0,
             "rain_probability": fc.rain_probability if fc else 0,
             "rain_next_24h_mm": round(rain_24h, 1),
-            "risk_score": risk.score if risk else 0.0,
-            "risk_level": risk.risk_level if risk else "Baixo",
+            "risk_score": risk.score if risk_current else None,
+            "risk_level": risk.risk_level if risk_current else None,
+            "risk_assessed_at": to_utc_iso(risk.assessed_at) if risk else None,
             "observed_at": (
                 current_obs.observed_at.replace(tzinfo=timezone.utc).isoformat()
                 if current_obs and current_obs.observed_at else None
@@ -461,6 +468,8 @@ def api_climate_history(region_id: int):
         "selected_month": selected_month,
         "selected_year": selected_year,
         "month_normal": month_normal,
+        # Normal oficial INMET 1991–2020 da estação mais próxima (só referência; anomalias usam a ERA5).
+        "inmet_normal": get_region_inmet_normal(region, selected_month),
         "selected_record": selected_record,
         "rain_anomaly_pct": rain_anomaly_pct,
         "temp_anomaly_c": temp_anomaly_c,
