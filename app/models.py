@@ -147,8 +147,14 @@ class MonthlyClimateSummary(db.Model):
     month = db.Column(db.Integer, nullable=False, index=True)  # 1 (Janeiro) a 12 (Dezembro)
 
     avg_temp_c = db.Column(db.Float, nullable=True)            # Temperatura média do mês (°C)
-    max_temp_c = db.Column(db.Float, nullable=True)            # Temperatura máxima registrada/média (°C)
-    min_temp_c = db.Column(db.Float, nullable=True)            # Temperatura mínima registrada/média (°C)
+    # Extremos absolutos do mês (maior máxima / menor mínima diária). Na normal (year=0),
+    # média desses extremos ao longo dos anos — não é a faixa típica do dia.
+    max_temp_c = db.Column(db.Float, nullable=True)
+    min_temp_c = db.Column(db.Float, nullable=True)
+    # Média das máximas / mínimas diárias do mês (faixa típica do dia, comparável à normal
+    # do INMET). Na normal (year=0), média dos anos que têm o valor. Null até o preenchimento.
+    mean_max_temp_c = db.Column(db.Float, nullable=True)
+    mean_min_temp_c = db.Column(db.Float, nullable=True)
     total_rain_mm = db.Column(db.Float, nullable=True)         # Chuva acumulada no mês (mm)
     rainy_days = db.Column(db.Integer, nullable=True)          # Dias com precipitação >= 1.0 mm
     max_wind_kmh = db.Column(db.Float, nullable=True)          # Pico de vento no mês (km/h)

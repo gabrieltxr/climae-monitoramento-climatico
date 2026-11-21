@@ -109,6 +109,8 @@ def sync_and_audit():
                     total_rain_mm=rec.total_rain_mm,
                     rainy_days=rec.rainy_days,
                     max_wind_kmh=rec.max_wind_kmh,
+                    mean_max_temp_c=rec.mean_max_temp_c,
+                    mean_min_temp_c=rec.mean_min_temp_c,
                     source=source_label,
                     updated_at=rec.updated_at
                 )

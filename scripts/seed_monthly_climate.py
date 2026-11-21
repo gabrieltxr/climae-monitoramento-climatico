@@ -40,7 +40,14 @@ def get_seed_end_date(reference_date: datetime = None) -> str:
     return f"{year}-{month:02d}-{calendar.monthrange(year, month)[1]:02d}"
 
 
-def fetch_daily_archive(lat: float, lon: float, start_date: str, end_date: str) -> dict | None:
+DAILY_VARIABLES = (
+    "temperature_2m_mean,temperature_2m_max,temperature_2m_min,"
+    "precipitation_sum,wind_speed_10m_max"
+)
+
+
+def fetch_daily_archive(lat: float, lon: float, start_date: str, end_date: str,
+                        daily_variables: str = DAILY_VARIABLES) -> dict | None:
     """
     Busca a serie diaria historica da reanalise ERA5 com tratamento inteligente
     para o limite de requisicoes por minuto (HTTP 429) da Open-Meteo.
@@ -50,10 +57,7 @@ def fetch_daily_archive(lat: float, lon: float, start_date: str, end_date: str) 
         "longitude": lon,
         "start_date": start_date,
         "end_date": end_date,
-        "daily": (
-            "temperature_2m_mean,temperature_2m_max,temperature_2m_min,"
-            "precipitation_sum,wind_speed_10m_max"
-        ),
+        "daily": daily_variables,
         "timezone": "UTC",
     }
     headers = {"User-Agent": "CLIMAE-HistoricalSeeder/1.0"}
@@ -125,6 +129,8 @@ def aggregate_and_save_region(region: Region, daily_data: dict) -> dict:
         "total_rains": [],
         "rainy_days": [],
         "max_winds": [],
+        "mean_maxs": [],
+        "mean_mins": [],
     })
 
     # Protecao estrita contra duplicacoes: remove qualquer registro anterior desta regiao
@@ -143,6 +149,9 @@ def aggregate_and_save_region(region: Region, daily_data: dict) -> dict:
         tot_rain = round(sum(vals["rain"]), 1) if vals["rain"] else 0.0
         r_days = sum(1 for r in vals["rain"] if r >= 1.0)
         pk_wind = round(max(vals["wind"]), 1) if vals["wind"] else None
+        # Média das máximas/mínimas diárias: só com todos os dias do mês preenchidos.
+        mean_max = round(sum(vals["t_max"]) / days_in_month, 1) if len(vals["t_max"]) == days_in_month else None
+        mean_min = round(sum(vals["t_min"]) / days_in_month, 1) if len(vals["t_min"]) == days_in_month else None
 
         summary = MonthlyClimateSummary(
             region_id=region.id,
@@ -154,6 +163,8 @@ def aggregate_and_save_region(region: Region, daily_data: dict) -> dict:
             total_rain_mm=tot_rain,
             rainy_days=r_days,
             max_wind_kmh=pk_wind,
+            mean_max_temp_c=mean_max,
+            mean_min_temp_c=mean_min,
             source="Open-Meteo ERA5 Reanalysis (2000-Presente)",
             updated_at=now_utc,
         )
@@ -172,6 +183,10 @@ def aggregate_and_save_region(region: Region, daily_data: dict) -> dict:
             c_acc["rainy_days"].append(r_days)
             if pk_wind is not None:
                 c_acc["max_winds"].append(pk_wind)
+            if mean_max is not None:
+                c_acc["mean_maxs"].append(mean_max)
+            if mean_min is not None:
+                c_acc["mean_mins"].append(mean_min)
 
     normals_count = 0
     for month in range(1, 13):
@@ -189,6 +204,8 @@ def aggregate_and_save_region(region: Region, daily_data: dict) -> dict:
             total_rain_mm=round(sum(c_acc["total_rains"]) / len(c_acc["total_rains"]), 1),
             rainy_days=int(round(sum(c_acc["rainy_days"]) / len(c_acc["rainy_days"]))),
             max_wind_kmh=round(sum(c_acc["max_winds"]) / len(c_acc["max_winds"]), 1) if c_acc["max_winds"] else None,
+            mean_max_temp_c=round(sum(c_acc["mean_maxs"]) / len(c_acc["mean_maxs"]), 1) if c_acc["mean_maxs"] else None,
+            mean_min_temp_c=round(sum(c_acc["mean_mins"]) / len(c_acc["mean_mins"]), 1) if c_acc["mean_mins"] else None,
             source="Normal Climatologica CLIMAE (Media ERA5 2000-2026)",
             updated_at=now_utc,
         )
